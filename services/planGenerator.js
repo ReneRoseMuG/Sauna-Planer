@@ -310,6 +310,7 @@ export function generatePlanSvg(saunaConfig, options = {}) {
       guidesGroup: gGuides,
       dimGroup: gDims,
       textGroup: gText,
+      textOffsetOverride: cm(8),
       fontSizePx: dimTextFontSizePx,
     })
   );
@@ -327,7 +328,7 @@ export function generatePlanSvg(saunaConfig, options = {}) {
       guidesGroup: gGuides,
       dimGroup: gDims,
       textGroup: gText,
-      textOffsetOverride: cm(6),
+      textOffsetOverride: cm(12),
       fontSizePx: dimTextFontSizePx,
     })
   );

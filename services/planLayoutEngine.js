@@ -69,9 +69,8 @@ export function composePlanDocument({ template, planSvg, planGeometryBounds, pla
     legend: { x: left, y: legendTop, width: innerWidth, height: legendHeight },
   };
 
-  drawFrame(svg, slots.header, "slot-header");
-  drawFrame(svg, slots.content, "slot-content");
-  drawFrame(svg, slots.legend, "slot-legend");
+  drawSeparatorLine(svg, slots.content.x, slots.content.x + slots.content.width, slots.content.y, "slot-divider");
+  drawSeparatorLine(svg, slots.legend.x, slots.legend.x + slots.legend.width, slots.legend.y, "slot-divider");
 
   svg.appendChild(create("text", { x: slots.header.x + 12, y: slots.header.y + 26, class: "title" }, meta.title || "Fundamentplan"));
   svg.appendChild(
@@ -424,12 +423,12 @@ function createBounds(minX, minY, maxX, maxY) {
   };
 }
 
-function drawFrame(svg, slot, className) {
-  svg.appendChild(create("rect", {
-    x: slot.x,
-    y: slot.y,
-    width: slot.width,
-    height: slot.height,
+function drawSeparatorLine(svg, x1, x2, y, className) {
+  svg.appendChild(create("line", {
+    x1,
+    y1: y,
+    x2,
+    y2: y,
     class: className,
   }));
 }
@@ -437,8 +436,7 @@ function drawFrame(svg, slot, className) {
 function createStyle() {
   const style = create("style");
   style.textContent = `
-    .slot-header, .slot-content, .slot-legend {
-      fill: #ffffff;
+    .slot-divider {
       stroke: #d1d5db;
       stroke-width: 1;
       vector-effect: non-scaling-stroke;

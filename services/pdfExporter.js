@@ -34,6 +34,7 @@ export async function exportSvgToPdf(svgElement, meta = {}) {
   const margin = 6;
 
   const cloned = /** @type {SVGSVGElement} */ (svgElement.cloneNode(true));
+  flattenDimensionMarkersForPdf(cloned);
   const viewBox = cloned.viewBox?.baseVal;
   const vbWidth = viewBox && viewBox.width > 0 ? viewBox.width : parseFloat(cloned.getAttribute("width")) || 1000;
   const vbHeight = viewBox && viewBox.height > 0 ? viewBox.height : parseFloat(cloned.getAttribute("height")) || 1000;
@@ -68,6 +69,66 @@ export async function exportSvgToPdf(svgElement, meta = {}) {
 
   const safeName = sanitizeFileName(meta.fileName || "fundamentplan.pdf");
   doc.save(safeName);
+}
+
+/**
+ * svg2pdf/jsPDF verlieren teils Marker (marker-start/marker-end).
+ * Daher werden Pfeile fuer Masslinien als echte Polygon-Geometrie erzeugt.
+ * @param {SVGSVGElement} svg
+ */
+function flattenDimensionMarkersForPdf(svg) {
+  const dimLines = svg.querySelectorAll(".layer-dimensions line");
+  for (const line of dimLines) {
+    const x1 = Number(line.getAttribute("x1"));
+    const y1 = Number(line.getAttribute("y1"));
+    const x2 = Number(line.getAttribute("x2"));
+    const y2 = Number(line.getAttribute("y2"));
+    if (![x1, y1, x2, y2].every(Number.isFinite)) {
+      continue;
+    }
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (!Number.isFinite(len) || len < 1e-6) {
+      continue;
+    }
+
+    const ux = dx / len;
+    const uy = dy / len;
+    const strokeWidth = Number(line.getAttribute("stroke-width")) || 2;
+    const arrowLen = Math.max(6, strokeWidth * 5);
+    const arrowHalfWidth = Math.max(3, strokeWidth * 2);
+    const arrowColor = line.getAttribute("stroke") || "#0f172a";
+
+    const startArrow = buildArrowPolygon(x1, y1, -ux, -uy, arrowLen, arrowHalfWidth, arrowColor);
+    const endArrow = buildArrowPolygon(x2, y2, ux, uy, arrowLen, arrowHalfWidth, arrowColor);
+
+    line.parentNode?.appendChild(startArrow);
+    line.parentNode?.appendChild(endArrow);
+
+    const existingStyle = line.getAttribute("style") || "";
+    line.setAttribute("style", `${existingStyle};marker-start:none;marker-end:none;`.trim());
+    line.removeAttribute("marker-start");
+    line.removeAttribute("marker-end");
+  }
+}
+
+function buildArrowPolygon(tipX, tipY, dirX, dirY, arrowLen, arrowHalfWidth, color) {
+  const baseCenterX = tipX - dirX * arrowLen;
+  const baseCenterY = tipY - dirY * arrowLen;
+  const nx = -dirY;
+  const ny = dirX;
+  const p1x = baseCenterX + nx * arrowHalfWidth;
+  const p1y = baseCenterY + ny * arrowHalfWidth;
+  const p2x = baseCenterX - nx * arrowHalfWidth;
+  const p2y = baseCenterY - ny * arrowHalfWidth;
+
+  const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  polygon.setAttribute("points", `${tipX},${tipY} ${p1x},${p1y} ${p2x},${p2y}`);
+  polygon.setAttribute("fill", color);
+  polygon.setAttribute("stroke", "none");
+  return polygon;
 }
 
 function inferPageMm(svgElement) {

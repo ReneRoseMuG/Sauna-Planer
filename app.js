@@ -9,6 +9,7 @@ const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 const state = {
   selectedId: "",
+  activeEditorTab: "config",
   saunas: [],
   dirty: false,
   runtimeWarnings: [],
@@ -36,6 +37,10 @@ const elements = {
   exportFormat: document.getElementById("field-export-format"),
   templateId: document.getElementById("field-template-id"),
   dimFontSize: document.getElementById("field-dim-font-size"),
+  tabConfig: document.getElementById("tab-config"),
+  tabPlan: document.getElementById("tab-plan"),
+  panelConfig: document.getElementById("panel-config"),
+  panelPlan: document.getElementById("panel-plan"),
   btnNew: document.getElementById("btn-new"),
   btnDelete: document.getElementById("btn-delete"),
   btnSave: document.getElementById("btn-save"),
@@ -54,6 +59,7 @@ async function init() {
 
   state.selectedId = state.saunas.length > 0 ? state.saunas[0].id : "";
   bindEvents();
+  setActiveEditorTab("config");
   renderSaunaList();
 
   if (state.selectedId) {
@@ -66,6 +72,14 @@ async function init() {
 }
 
 function bindEvents() {
+  elements.tabConfig.addEventListener("click", () => {
+    setActiveEditorTab("config");
+  });
+
+  elements.tabPlan.addEventListener("click", () => {
+    setActiveEditorTab("plan");
+  });
+
   elements.btnNew.addEventListener("click", async () => {
     state.runtimeWarnings = [];
     const created = createEmptySauna();
@@ -226,6 +240,21 @@ function bindEvents() {
       renderWarnings([`Export fehlgeschlagen: ${error.message}`]);
     }
   });
+}
+
+function setActiveEditorTab(tabId) {
+  state.activeEditorTab = tabId === "plan" ? "plan" : "config";
+
+  const isConfig = state.activeEditorTab === "config";
+  elements.tabConfig.classList.toggle("is-active", isConfig);
+  elements.tabPlan.classList.toggle("is-active", !isConfig);
+  elements.tabConfig.setAttribute("aria-selected", isConfig ? "true" : "false");
+  elements.tabPlan.setAttribute("aria-selected", isConfig ? "false" : "true");
+
+  elements.panelConfig.classList.toggle("is-active", isConfig);
+  elements.panelPlan.classList.toggle("is-active", !isConfig);
+  elements.panelConfig.hidden = !isConfig;
+  elements.panelPlan.hidden = isConfig;
 }
 
 async function refreshSaunas() {
