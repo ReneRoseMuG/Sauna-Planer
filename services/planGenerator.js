@@ -15,11 +15,10 @@ const SCALE = 10; // 1 cm = 10 SVG units
 export function computeFootCenters(saunaConfig) {
   const distances = Array.isArray(saunaConfig.footDistances) ? saunaConfig.footDistances : [];
   const footThickness = Math.max(0, Number(saunaConfig.footThickness) || 0);
-  const centers = [0];
+  const centers = [footThickness / 2];
   for (const distance of distances) {
     const innerGap = Math.max(0, Number(distance) || 0);
-    // Innenabstand -> Mittelpunktabstand = Innenabstand + Fussdicke.
-    centers.push(centers[centers.length - 1] + innerGap + footThickness);
+    centers.push(centers[centers.length - 1] + footThickness + innerGap);
   }
   return centers;
 }
@@ -29,42 +28,65 @@ export function computeFootCenters(saunaConfig) {
  * @returns {PlanMetrics}
  */
 export function computeDerivedDimensions(saunaConfig) {
-  const centers = computeFootCenters(saunaConfig);
+  const distances = Array.isArray(saunaConfig.footDistances) ? saunaConfig.footDistances : [];
   const footThickness = Math.max(0, Number(saunaConfig.footThickness) || 0);
-  const first = centers[0] ?? 0;
-  const last = centers[centers.length - 1] ?? 0;
-  const firstToLast = last - first; // Mittelpunkt erster zu Mittelpunkt letzter Fuss.
-  const totalFootSpan = firstToLast + footThickness; // Aussenkante erster bis Aussenkante letzter Fuss.
-  return {
-    footCount: centers.length,
-    totalFootSpan,
-    firstToLast,
-  };
+  const footCount = distances.length + 1;
+  const innerSum = distances.reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+  const totalFootSpan = innerSum + footCount * footThickness;
+  const firstToLast = Math.max(0, totalFootSpan - footThickness);
+  return { footCount, totalFootSpan, firstToLast };
 }
 
 /**
  * @param {import("../domain/sauna.js").SaunaConfig} saunaConfig
  * @param {{title?: string}=} options
- * @returns {{ svgElement: SVGSVGElement, metrics: PlanMetrics, warnings: string[] }}
+ * @returns {{
+ *   svgElement: SVGSVGElement,
+ *   metrics: PlanMetrics,
+ *   warnings: string[],
+ *   geometryBounds: { xMin:number, yMin:number, minX:number, minY:number, maxX:number, maxY:number, width:number, height:number },
+ *   annotationBounds: { xMin:number, yMin:number, minX:number, minY:number, maxX:number, maxY:number, width:number, height:number }
+ * }}
  */
 export function generatePlanSvg(saunaConfig, options = {}) {
   const warnings = [];
   const metrics = computeDerivedDimensions(saunaConfig);
-  const centersRaw = computeFootCenters(saunaConfig);
-  const centerShift = ((centersRaw[0] ?? 0) + (centersRaw[centersRaw.length - 1] ?? 0)) / 2;
-  const footCenters = centersRaw.map((value) => value - centerShift);
 
-  if (saunaConfig.barrelLength < metrics.totalFootSpan) {
-    warnings.push("Warnung: Fasslaenge ist kleiner als die Gesamtausdehnung der Fuesse (Aussenkante bis Aussenkante).");
+  // Verbindliche Achsensemantik (SizeX/SizeY)
+  const barrelSizeX = cm(Math.max(0, Number(saunaConfig.barrelWidth) || 0));
+  const barrelSizeY = cm(Math.max(0, Number(saunaConfig.barrelLength) || 0));
+  const footSizeX = cm(Math.max(0, Number(saunaConfig.footWidth) || 0));
+  const footSizeY = cm(Math.max(0, Number(saunaConfig.footThickness) || 0));
+  // Fachregel:
+  // - foundationWidth beschreibt die Ausdehnung auf der Y-Achse.
+  // - Auf der X-Achse entspricht der Fundamentstreifen exakt der Fussbreite.
+  const foundationSizeX = footSizeX;
+  const foundationSizeY = cm(Math.max(0, Number(saunaConfig.foundationWidth) || 0));
+
+  if (barrelSizeX <= 0 || barrelSizeY <= 0) {
+    warnings.push("Warnung: Fassgroesse ist ungueltig (Breite/Laenge <= 0).");
+  }
+  if (footSizeX <= 0 || footSizeY <= 0) {
+    warnings.push("Warnung: Fussgroesse ist ungueltig (footSizeX/footSizeY <= 0).");
+  }
+  if (foundationSizeY <= 0) {
+    warnings.push("Warnung: Fundamentbreite ist ungueltig (foundationSizeY <= 0).");
   }
 
-  const barrelLength = cm(saunaConfig.barrelLength);
-  const barrelWidth = cm(saunaConfig.barrelWidth);
-  const footWidth = cm(saunaConfig.footWidth);
-  const footThickness = cm(saunaConfig.footThickness);
-  const foundationWidth = cm(saunaConfig.foundationWidth);
-  // Keine separate Fundamentdicke im Modell vorhanden; die Fussdicke wird fuer die Draufsicht verwendet.
-  const foundationThickness = footThickness;
+  const rawDistances = Array.isArray(saunaConfig.footDistances) ? saunaConfig.footDistances : [];
+  const footDistancesCm = rawDistances.map((value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+      return 0;
+    }
+    return n;
+  });
+  if (rawDistances.some((value) => !Number.isFinite(Number(value)) || Number(value) < 0)) {
+    warnings.push("Warnung: footDistances enthaelt ungueltige Werte. Diese wurden auf 0 gesetzt.");
+  }
+  if (footDistancesCm.length < 2) {
+    warnings.push("Hinweis: Fuer die Reihen-Variante werden mindestens 3 Fuesse (footDistances.length >= 2) empfohlen.");
+  }
 
   const svg = createEl("svg", {
     xmlns: SVG_NS,
@@ -72,206 +94,450 @@ export function generatePlanSvg(saunaConfig, options = {}) {
     "aria-label": options.title || "Fundamentplan",
   });
 
+  svg.appendChild(createDefs());
+  svg.appendChild(createStyle());
+
+  const gGeometry = createEl("g", { class: "geometry-group layer-geometry", "data-group": "geometry" });
+  const gAnnotation = createEl("g", { class: "annotation-group layer-annotation", "data-group": "annotation" });
+
+  const gBarrel = createEl("g", { class: "layer-barrel" });
   const gFoundation = createEl("g", { class: "layer-foundation" });
   const gFeet = createEl("g", { class: "layer-feet" });
-  const gBarrel = createEl("g", { class: "layer-barrel" });
   const gGuides = createEl("g", { class: "layer-guides" });
   const gDims = createEl("g", { class: "layer-dimensions" });
   const gText = createEl("g", { class: "layer-text" });
-  const gNote = createEl("g", { class: "layer-note" });
 
-  const style = createEl("style");
-  style.textContent = `
-    .layer-foundation rect { fill: #4b5563; stroke: #111827; stroke-width: ${2}; }
-    .layer-feet rect { fill: #8b5a2b; stroke: #111827; stroke-width: ${2}; }
-    .layer-barrel rect { fill: #f9fafb; stroke: #111827; stroke-width: ${2}; }
-    .layer-guides line { stroke: #9ca3af; stroke-width: ${1.5}; stroke-dasharray: 8 6; }
-    .layer-dimensions line { stroke: #111827; stroke-width: ${1.8}; }
-    .layer-text text, .layer-note text {
-      fill: #111827;
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: ${14};
-    }
-  `;
-  svg.appendChild(style);
+  gGeometry.appendChild(gBarrel);
+  gGeometry.appendChild(gFoundation);
+  gGeometry.appendChild(gFeet);
 
-  const barrelX = -barrelLength / 2;
-  const barrelY = -barrelWidth / 2;
-  const bodyHalfWidth = Math.max(barrelWidth, footWidth, foundationWidth) / 2;
+  gAnnotation.appendChild(gGuides);
+  gAnnotation.appendChild(gDims);
+  gAnnotation.appendChild(gText);
+
+  const barrelX = -barrelSizeX / 2;
+  const barrelY = -barrelSizeY / 2;
+  const barrelMaxX = barrelX + barrelSizeX;
+  const barrelMaxY = barrelY + barrelSizeY;
 
   gBarrel.appendChild(
     createEl("rect", {
       x: barrelX,
       y: barrelY,
-      width: barrelLength,
-      height: barrelWidth,
+      width: barrelSizeX,
+      height: barrelSizeY,
     })
   );
 
-  let minX = barrelX;
-  let maxX = barrelX + barrelLength;
-  let minY = -bodyHalfWidth;
-  let maxY = bodyHalfWidth;
+  let geometryMinX = barrelX;
+  let geometryMaxX = barrelMaxX;
+  let geometryMinY = barrelY;
+  let geometryMaxY = barrelMaxY;
 
-  for (const center of footCenters) {
-    const centerX = cm(center);
-    const footRect = createRectFromCenter(centerX, 0, footThickness, footWidth);
-    gFeet.appendChild(footRect);
-
-    const foundationRect = createRectFromCenter(centerX, 0, foundationThickness, foundationWidth);
-    gFoundation.appendChild(foundationRect);
-
-    minX = Math.min(minX, centerX - footThickness / 2);
-    maxX = Math.max(maxX, centerX + footThickness / 2);
+  const footCount = footDistancesCm.length + 1;
+  // Interne Konstruktionslogik in Y-up, mit Bezug auf die untere Fasskante als Null-Referenz:
+  // - "Y=0" fuer die Streifenreihe entspricht der unteren Fasskante.
+  // - erster Fundamentstreifen: Unterkante bei dieser Referenz.
+  const barrelBottomYUp = -barrelSizeY / 2;
+  const foundationCenterYUp = [barrelBottomYUp + foundationSizeY / 2];
+  /** @type {number[]} */
+  const footCenterYUp = [foundationCenterYUp[0]];
+  for (let i = 1; i < footCount; i += 1) {
+    const gapY = cm(footDistancesCm[i - 1]);
+    footCenterYUp.push(footCenterYUp[i - 1] + footSizeY / 2 + gapY + footSizeY / 2);
+    foundationCenterYUp.push(footCenterYUp[i]);
   }
 
-  const dimStartY = bodyHalfWidth + cm(25);
-  const segmentDimY = dimStartY;
-  const totalDimY = dimStartY + cm(14);
+  for (let i = 0; i < footCenterYUp.length; i += 1) {
+    const foundationCenterYSvg = yUpToSvg(foundationCenterYUp[i]);
+    const footCenterYSvg = yUpToSvg(footCenterYUp[i]);
 
-  if (footCenters.length > 1) {
-    for (let i = 0; i < footCenters.length - 1; i += 1) {
-      const x1 = cm(footCenters[i] + saunaConfig.footThickness / 2);
-      const x2 = cm(footCenters[i + 1] - saunaConfig.footThickness / 2);
-      drawHorizontalDimension({
+    const foundationRect = createRectFromCenter(0, foundationCenterYSvg, foundationSizeX, foundationSizeY);
+    const footRect = createRectFromCenter(0, footCenterYSvg, footSizeX, footSizeY);
+    gFoundation.appendChild(foundationRect);
+    gFeet.appendChild(footRect);
+
+    geometryMinX = Math.min(geometryMinX, -foundationSizeX / 2, -footSizeX / 2);
+    geometryMaxX = Math.max(geometryMaxX, foundationSizeX / 2, footSizeX / 2);
+    geometryMinY = Math.min(geometryMinY, foundationCenterYSvg - foundationSizeY / 2, footCenterYSvg - footSizeY / 2);
+    geometryMaxY = Math.max(geometryMaxY, foundationCenterYSvg + foundationSizeY / 2, footCenterYSvg + footSizeY / 2);
+  }
+
+  let annotationMinX = Number.POSITIVE_INFINITY;
+  let annotationMaxX = Number.NEGATIVE_INFINITY;
+  let annotationMinY = Number.POSITIVE_INFINITY;
+  let annotationMaxY = Number.NEGATIVE_INFINITY;
+
+  const trackAnnotation = (bounds) => {
+    if (!bounds) return;
+    annotationMinX = Math.min(annotationMinX, bounds.minX);
+    annotationMaxX = Math.max(annotationMaxX, bounds.maxX);
+    annotationMinY = Math.min(annotationMinY, bounds.minY);
+    annotationMaxY = Math.max(annotationMaxY, bounds.maxY);
+  };
+
+  const baseDimRefX = Math.max(geometryMaxX, barrelMaxX);
+  const segmentOffsetX = cm(22);
+  const totalOffsetX = cm(36);
+  const leftDimRefX = -foundationSizeX / 2;
+  const leftDetailOffsetX = -cm(30);
+  const leftOverallOffsetX = -cm(44);
+  const leftMostDimX = leftDimRefX + Math.min(leftDetailOffsetX, leftOverallOffsetX);
+  const leftTextX = leftMostDimX - cm(6);
+  const leftOverallTextX = leftTextX - cm(7);
+
+  // Fuer jeden Fuss links eine Aussen-Bemassung:
+  // Randabstand oben, Fussdicke, Randabstand unten, Gesamtbreite des Fundamentstreifens.
+  for (let i = 0; i < footCenterYUp.length; i += 1) {
+    const yFoundationTopUp = foundationCenterYUp[i] + foundationSizeY / 2;
+    const yFootTopUp = footCenterYUp[i] + footSizeY / 2;
+    const yFootBottomUp = footCenterYUp[i] - footSizeY / 2;
+    const yFoundationBottomUp = foundationCenterYUp[i] - foundationSizeY / 2;
+    const marginUpCm = ((foundationSizeY - footSizeY) / 2) / SCALE;
+
+    trackAnnotation(
+      drawDimension({
+        x1: leftDimRefX,
+        y1: yUpToSvg(yFoundationTopUp),
+        x2: leftDimRefX,
+        y2: yUpToSvg(yFootTopUp),
+        offset: leftDetailOffsetX,
+        text: `${formatCm(marginUpCm)}`,
+        orientation: "vertical",
         guidesGroup: gGuides,
         dimGroup: gDims,
         textGroup: gText,
-        x1,
-        x2,
-        y: segmentDimY,
-        guideYStart: bodyHalfWidth,
-        label: `${formatCm(saunaConfig.footDistances[i])} cm`,
-      });
-    }
+        textXOverride: leftTextX,
+        textAnchorOverride: "end",
+        rotateText: false,
+      })
+    );
 
-    drawHorizontalDimension({
+    trackAnnotation(
+      drawDimension({
+        x1: leftDimRefX,
+        y1: yUpToSvg(yFootTopUp),
+        x2: leftDimRefX,
+        y2: yUpToSvg(yFootBottomUp),
+        offset: leftDetailOffsetX,
+        text: `${formatCm(Number(saunaConfig.footThickness) || 0)}`,
+        orientation: "vertical",
+        guidesGroup: gGuides,
+        dimGroup: gDims,
+        textGroup: gText,
+        textXOverride: leftTextX,
+        textAnchorOverride: "end",
+        rotateText: false,
+      })
+    );
+
+    trackAnnotation(
+      drawDimension({
+        x1: leftDimRefX,
+        y1: yUpToSvg(yFootBottomUp),
+        x2: leftDimRefX,
+        y2: yUpToSvg(yFoundationBottomUp),
+        offset: leftDetailOffsetX,
+        text: `${formatCm(marginUpCm)}`,
+        orientation: "vertical",
+        guidesGroup: gGuides,
+        dimGroup: gDims,
+        textGroup: gText,
+        textXOverride: leftTextX,
+        textAnchorOverride: "end",
+        rotateText: false,
+      })
+    );
+
+    trackAnnotation(
+      drawDimension({
+        x1: leftDimRefX,
+        y1: yUpToSvg(yFoundationTopUp),
+        x2: leftDimRefX,
+        y2: yUpToSvg(yFoundationBottomUp),
+        offset: leftOverallOffsetX,
+        text: `${formatCm(Number(saunaConfig.foundationWidth) || 0)}`,
+        orientation: "vertical",
+        guidesGroup: gGuides,
+        dimGroup: gDims,
+        textGroup: gText,
+        textXOverride: leftOverallTextX,
+        textAnchorOverride: "end",
+        rotateText: false,
+      })
+    );
+  }
+
+  // Segmentmasse (Innenkante zu Innenkante) entlang der Y-Achse
+  for (let i = 0; i < footCenterYUp.length - 1; i += 1) {
+    const yInnerUpperCurrentUp = footCenterYUp[i] + footSizeY / 2;
+    const yInnerLowerNextUp = footCenterYUp[i + 1] - footSizeY / 2;
+
+    trackAnnotation(
+      drawDimension({
+        x1: baseDimRefX,
+        y1: yUpToSvg(yInnerUpperCurrentUp),
+        x2: baseDimRefX,
+        y2: yUpToSvg(yInnerLowerNextUp),
+        offset: segmentOffsetX,
+        text: `${formatCm(footDistancesCm[i])}`,
+        orientation: "vertical",
+        guidesGroup: gGuides,
+        dimGroup: gDims,
+        textGroup: gText,
+      })
+    );
+  }
+
+  // Gesamtmass der Fussreihe: Sum(footDistances) + footCount * footSizeY
+  const totalStartYUp = footCenterYUp[0] - footSizeY / 2;
+  const totalEndYUp = footCenterYUp[footCenterYUp.length - 1] + footSizeY / 2;
+  const totalFootSpanCm = footDistancesCm.reduce((sum, value) => sum + value, 0) + footCount * (Number(saunaConfig.footThickness) || 0);
+
+  trackAnnotation(
+    drawDimension({
+      x1: baseDimRefX,
+      y1: yUpToSvg(totalStartYUp),
+      x2: baseDimRefX,
+      y2: yUpToSvg(totalEndYUp),
+      offset: totalOffsetX,
+      text: `${formatCm(totalFootSpanCm)}`,
+      orientation: "vertical",
       guidesGroup: gGuides,
       dimGroup: gDims,
       textGroup: gText,
-      x1: cm(footCenters[0] - saunaConfig.footThickness / 2),
-      x2: cm(footCenters[footCenters.length - 1] + saunaConfig.footThickness / 2),
-      y: totalDimY,
-      guideYStart: bodyHalfWidth,
-      label: `${formatCm(metrics.totalFootSpan)} cm`,
-    });
-  }
+    })
+  );
 
-  const rightBodyX = Math.max(maxX, barrelX + barrelLength / 2);
-  const crossX1 = rightBodyX + cm(20);
-  const crossX2 = rightBodyX + cm(34);
-  const crossX3 = rightBodyX + cm(48);
+  // Fussbreite (X) ueber der Fassbreiten-Bemassung
+  trackAnnotation(
+    drawDimension({
+      x1: -footSizeX / 2,
+      y1: barrelMaxY,
+      x2: footSizeX / 2,
+      y2: barrelMaxY,
+      offset: cm(20),
+      text: `${formatCm(Number(saunaConfig.footWidth) || 0)}`,
+      orientation: "horizontal",
+      guidesGroup: gGuides,
+      dimGroup: gDims,
+      textGroup: gText,
+    })
+  );
 
-  drawVerticalDimension({
-    guidesGroup: gGuides,
-    dimGroup: gDims,
-    textGroup: gText,
-    x: crossX1,
-    y1: -barrelWidth / 2,
-    y2: barrelWidth / 2,
-    guideXStart: rightBodyX,
-    label: `${formatCm(saunaConfig.barrelWidth)} cm`,
-  });
-  drawVerticalDimension({
-    guidesGroup: gGuides,
-    dimGroup: gDims,
-    textGroup: gText,
-    x: crossX2,
-    y1: -foundationWidth / 2,
-    y2: foundationWidth / 2,
-    guideXStart: rightBodyX,
-    label: `${formatCm(saunaConfig.foundationWidth)} cm`,
-  });
-  drawVerticalDimension({
-    guidesGroup: gGuides,
-    dimGroup: gDims,
-    textGroup: gText,
-    x: crossX3,
-    y1: -footWidth / 2,
-    y2: footWidth / 2,
-    guideXStart: rightBodyX,
-    label: `${formatCm(saunaConfig.footWidth)} cm`,
-  });
+  // Fassmasse weiterhin technisch zugeordnet
+  trackAnnotation(
+    drawDimension({
+      x1: barrelX,
+      y1: barrelMaxY,
+      x2: barrelMaxX,
+      y2: barrelMaxY,
+      offset: cm(42),
+      text: `${formatCm(Number(saunaConfig.barrelWidth) || 0)}`,
+      orientation: "horizontal",
+      guidesGroup: gGuides,
+      dimGroup: gDims,
+      textGroup: gText,
+      textOffsetOverride: cm(6),
+    })
+  );
 
-  minX = Math.min(minX, -barrelLength / 2, cm((footCenters[0] ?? 0) - saunaConfig.footThickness / 2));
-  maxX = Math.max(maxX, crossX3 + cm(18));
-  minY = Math.min(minY, -bodyHalfWidth - cm(20));
-  maxY = Math.max(maxY, totalDimY + cm(20));
+  trackAnnotation(
+    drawDimension({
+      x1: barrelMaxX,
+      y1: barrelY,
+      x2: barrelMaxX,
+      y2: barrelMaxY,
+      offset: cm(20),
+      text: `${formatCm(Number(saunaConfig.barrelLength) || 0)}`,
+      orientation: "vertical",
+      guidesGroup: gGuides,
+      dimGroup: gDims,
+      textGroup: gText,
+    })
+  );
 
-  const noteLines = [
-    "Alle Masse in cm",
-    "Zeichnung nicht bemasst abnehmen",
-    "Fundamentempfehlung - Ausfuehrung bauseits",
-    `Frosttiefe: ${formatCm(saunaConfig.foundationDepth)} cm`,
-  ];
-  const noteX = minX + cm(4);
-  const noteTop = minY + cm(8);
-  noteLines.forEach((line, index) => {
-    gNote.appendChild(
-      createEl("text", {
-        x: noteX,
-        y: noteTop + index * cm(6),
-      }, line)
+  const geometryBounds = createBounds(geometryMinX, geometryMinY, geometryMaxX, geometryMaxY);
+  const annotationBounds = Number.isFinite(annotationMinX)
+    ? createBounds(annotationMinX, annotationMinY, annotationMaxX, annotationMaxY)
+    : { ...geometryBounds };
+
+  const fullMinX = Math.min(geometryBounds.minX, annotationBounds.minX);
+  const fullMinY = Math.min(geometryBounds.minY, annotationBounds.minY);
+  const fullMaxX = Math.max(geometryBounds.maxX, annotationBounds.maxX);
+  const fullMaxY = Math.max(geometryBounds.maxY, annotationBounds.maxY);
+
+  svg.setAttribute("viewBox", `${Math.floor(fullMinX)} ${Math.floor(fullMinY)} ${Math.ceil(fullMaxX - fullMinX)} ${Math.ceil(fullMaxY - fullMinY)}`);
+
+  svg.appendChild(gGeometry);
+  svg.appendChild(gAnnotation);
+
+  return { svgElement: svg, metrics, warnings, geometryBounds, annotationBounds };
+}
+
+function drawDimension({
+  x1,
+  y1,
+  x2,
+  y2,
+  offset,
+  text,
+  orientation,
+  guidesGroup,
+  dimGroup,
+  textGroup,
+  textXOverride,
+  textAnchorOverride,
+  textOffsetOverride,
+  rotateText = true,
+}) {
+  const extensionOvershoot = cm(0.8); // 8 mm
+  const objectGap = cm(0.4); // 4 mm
+  const defaultTextOffset = cm(2.8);
+  const textOffset = Number.isFinite(Number(textOffsetOverride)) ? Number(textOffsetOverride) : defaultTextOffset;
+  const markerPad = cm(1.8);
+  const fontSize = 15;
+
+  if (orientation === "horizontal") {
+    const direction = offset >= 0 ? 1 : -1;
+    const baseY = (y1 + y2) / 2;
+    const dimY = baseY + offset;
+    const extStartY = baseY + direction * objectGap;
+    const extEndY = dimY + direction * extensionOvershoot;
+
+    guidesGroup.appendChild(createEl("line", { x1, y1: extStartY, x2: x1, y2: extEndY }));
+    guidesGroup.appendChild(createEl("line", { x1: x2, y1: extStartY, x2, y2: extEndY }));
+    dimGroup.appendChild(createEl("line", { x1, y1: dimY, x2, y2: dimY }));
+
+    const textX = (x1 + x2) / 2;
+    // Horizontale Massbeschriftung immer unter der Masslinie platzieren.
+    const textY = dimY + textOffset;
+    textGroup.appendChild(
+      createEl(
+        "text",
+        { x: textX, y: textY, "text-anchor": textAnchorOverride || "middle", "dominant-baseline": "hanging" },
+        text
+      )
     );
-  });
 
-  maxY = Math.max(maxY, noteTop + cm(noteLines.length * 6 + 2));
-
-  svg.setAttribute("viewBox", `${Math.floor(minX)} ${Math.floor(minY)} ${Math.ceil(maxX - minX)} ${Math.ceil(maxY - minY)}`);
-
-  svg.appendChild(gFoundation);
-  svg.appendChild(gFeet);
-  svg.appendChild(gBarrel);
-  svg.appendChild(gGuides);
-  svg.appendChild(gDims);
-  svg.appendChild(gText);
-  svg.appendChild(gNote);
-
-  return { svgElement: svg, metrics, warnings };
-}
-
-function drawHorizontalDimension({ guidesGroup, dimGroup, textGroup, x1, x2, y, guideYStart, label }) {
-  guidesGroup.appendChild(createEl("line", { x1, y1: guideYStart, x2: x1, y2: y }));
-  guidesGroup.appendChild(createEl("line", { x1: x2, y1: guideYStart, x2, y2: y }));
-
-  dimGroup.appendChild(createEl("line", { x1, y1: y, x2, y2: y }));
-  drawEndTick(dimGroup, x1, y, "vertical");
-  drawEndTick(dimGroup, x2, y, "vertical");
-
-  textGroup.appendChild(
-    createEl("text", {
-      x: (x1 + x2) / 2,
-      y: y - cm(2.5),
-      "text-anchor": "middle",
-    }, label)
-  );
-}
-
-function drawVerticalDimension({ guidesGroup, dimGroup, textGroup, x, y1, y2, guideXStart, label }) {
-  guidesGroup.appendChild(createEl("line", { x1: guideXStart, y1, x2: x, y2: y1 }));
-  guidesGroup.appendChild(createEl("line", { x1: guideXStart, y1: y2, x2: x, y2 }));
-
-  dimGroup.appendChild(createEl("line", { x1: x, y1, x2: x, y2 }));
-  drawEndTick(dimGroup, x, y1, "horizontal");
-  drawEndTick(dimGroup, x, y2, "horizontal");
-
-  textGroup.appendChild(
-    createEl("text", {
-      x: x + cm(2),
-      y: (y1 + y2) / 2,
-      transform: `rotate(90 ${x + cm(2)} ${(y1 + y2) / 2})`,
-      "text-anchor": "middle",
-    }, label)
-  );
-}
-
-function drawEndTick(group, x, y, orientation) {
-  const tick = cm(1.4);
-  if (orientation === "vertical") {
-    group.appendChild(createEl("line", { x1: x, y1: y - tick, x2: x, y2: y + tick }));
-    return;
+    const textWidth = estimateTextWidth(text, fontSize);
+    return {
+      minX: Math.min(x1, x2, textX - textWidth / 2) - markerPad,
+      minY: Math.min(extStartY, extEndY, dimY, textY - fontSize) - markerPad,
+      maxX: Math.max(x1, x2, textX + textWidth / 2) + markerPad,
+      maxY: Math.max(extStartY, extEndY, dimY, textY) + markerPad,
+    };
   }
-  group.appendChild(createEl("line", { x1: x - tick, y1: y, x2: x + tick, y2: y }));
+
+  const direction = offset >= 0 ? 1 : -1;
+  const baseX = (x1 + x2) / 2;
+  const dimX = baseX + offset;
+  const extStartX = baseX + direction * objectGap;
+  const extEndX = dimX + direction * extensionOvershoot;
+
+  guidesGroup.appendChild(createEl("line", { x1: extStartX, y1, x2: extEndX, y2: y1 }));
+  guidesGroup.appendChild(createEl("line", { x1: extStartX, y1: y2, x2: extEndX, y2 }));
+  dimGroup.appendChild(createEl("line", { x1: dimX, y1, x2: dimX, y2 }));
+
+  const textX = dimX + direction * textOffset;
+  const textY = (y1 + y2) / 2;
+  const finalTextX = Number.isFinite(Number(textXOverride)) ? Number(textXOverride) : textX;
+  const finalTextAnchor = textAnchorOverride || "middle";
+  textGroup.appendChild(
+    rotateText
+      ? createEl(
+          "text",
+          {
+            x: finalTextX,
+            y: textY,
+            transform: `rotate(90 ${finalTextX} ${textY})`,
+            "text-anchor": finalTextAnchor,
+          },
+          text
+        )
+      : createEl(
+          "text",
+          {
+            x: finalTextX,
+            y: textY,
+            "text-anchor": finalTextAnchor,
+            "dominant-baseline": "middle",
+          },
+          text
+        )
+  );
+
+  const textWidth = estimateTextWidth(text, fontSize);
+  const textHalfSpanY = rotateText ? textWidth / 2 : fontSize / 2;
+  const textHalfSpanX = rotateText ? fontSize / 2 : textWidth / 2;
+  return {
+    minX: Math.min(extStartX, extEndX, dimX, finalTextX - textHalfSpanX) - markerPad,
+    minY: Math.min(y1, y2, textY - textHalfSpanY) - markerPad,
+    maxX: Math.max(extStartX, extEndX, dimX, finalTextX + textHalfSpanX) + markerPad,
+    maxY: Math.max(y1, y2, textY + textHalfSpanY) + markerPad,
+  };
+}
+
+function createStyle() {
+  const style = createEl("style");
+  style.textContent = `
+    .layer-barrel rect {
+      fill: #f3f4f6;
+      stroke: #111827;
+      stroke-width: 2.4;
+      vector-effect: non-scaling-stroke;
+    }
+    .layer-foundation rect {
+      fill: #374151;
+      stroke: #000000;
+      stroke-width: 3.6;
+      vector-effect: non-scaling-stroke;
+      opacity: 0.96;
+    }
+    .layer-feet rect {
+      fill: #f59e0b;
+      stroke: #78350f;
+      stroke-width: 2.8;
+      vector-effect: non-scaling-stroke;
+      opacity: 0.98;
+    }
+    .layer-guides line {
+      stroke: #4b5563;
+      stroke-width: 1.5;
+      vector-effect: non-scaling-stroke;
+    }
+    .layer-dimensions line {
+      stroke: #0f172a;
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+      marker-start: url(#dim-arrow);
+      marker-end: url(#dim-arrow);
+    }
+    .layer-text text {
+      fill: #111827;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+    }
+  `;
+  return style;
+}
+
+function createDefs() {
+  const defs = createEl("defs");
+  const marker = createEl("marker", {
+    id: "dim-arrow",
+    viewBox: "0 0 10 10",
+    refX: "9",
+    refY: "5",
+    markerWidth: "6",
+    markerHeight: "6",
+    orient: "auto-start-reverse",
+    markerUnits: "strokeWidth",
+  });
+  marker.appendChild(createEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#0f172a" }));
+  defs.appendChild(marker);
+  return defs;
 }
 
 function createRectFromCenter(cx, cy, width, height) {
@@ -294,8 +560,31 @@ function createEl(name, attrs = {}, textContent = "") {
   return element;
 }
 
+function createBounds(minX, minY, maxX, maxY) {
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  return {
+    xMin: minX,
+    yMin: minY,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width,
+    height,
+  };
+}
+
+function estimateTextWidth(text, fontSize = 14) {
+  return String(text || "").length * (fontSize * 0.56);
+}
+
 function cm(value) {
   return (Number(value) || 0) * SCALE;
+}
+
+function yUpToSvg(valueYUp) {
+  return -valueYUp;
 }
 
 function formatCm(value) {

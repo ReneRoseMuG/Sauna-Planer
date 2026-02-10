@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="de">
   <head>
     <meta charset="utf-8" />
@@ -16,18 +16,17 @@
           <button id="btn-new" type="button">Neu</button>
           <button id="btn-delete" type="button">Loeschen</button>
         </div>
-        <div class="toolbar">
-          <label class="file-button">
-            JSON laden
-            <input id="input-json-import" type="file" accept="application/json" />
-          </label>
-          <button id="btn-json-export" type="button">JSON speichern</button>
-        </div>
         <ul id="sauna-list" class="sauna-list"></ul>
       </aside>
 
       <main class="panel panel-editor">
         <h2>Plan-Konfiguration</h2>
+
+        <div class="toolbar toolbar-primary">
+          <button id="btn-save" type="submit" form="sauna-form">Speichern</button>
+          <button id="btn-export" type="button">Export starten</button>
+        </div>
+
         <form id="sauna-form" autocomplete="off">
           <div class="form-grid">
             <label>Name
@@ -63,25 +62,34 @@
 
           <section class="distance-section">
             <div class="distance-header">
-              <h3>Referenzbild</h3>
+              <h3>Referenzbilder</h3>
             </div>
             <div class="toolbar">
               <label class="file-button">
                 Bild hochladen
                 <input id="input-image-upload" type="file" accept="image/png,image/jpeg,image/webp" />
               </label>
-              <button id="btn-image-remove" type="button">Bild entfernen</button>
             </div>
-            <p class="hint-text">Oder Bild aus Zwischenablage einfuegen (Ctrl+V)</p>
-            <div id="image-preview" class="image-preview">
-              <span class="image-placeholder">Kein Bild hinterlegt.</span>
-            </div>
+            <p class="hint-text">Bild per Upload oder Zwischenablage (Ctrl+V) hinzufuegen.</p>
+            <div id="image-gallery" class="image-gallery"></div>
           </section>
 
-          <div class="toolbar">
-            <button id="btn-save" type="submit">Speichern</button>
-            <button id="btn-pdf" type="button">PDF erzeugen</button>
-          </div>
+          <section class="distance-section">
+            <div class="distance-header">
+              <h3>Export</h3>
+            </div>
+            <div class="form-grid">
+              <label>Planformat
+                <select id="field-export-format">
+                  <option value="pdf">PDF</option>
+                  <option value="svg">SVG</option>
+                </select>
+              </label>
+              <label>Schablone
+                <select id="field-template-id"></select>
+              </label>
+            </div>
+          </section>
         </form>
 
         <section>
@@ -90,7 +98,7 @@
         </section>
 
         <section>
-          <h3>Vorschau (SVG)</h3>
+          <h3>Vorschau (Template + Plan)</h3>
           <div id="svg-preview" class="svg-preview"></div>
         </section>
       </main>

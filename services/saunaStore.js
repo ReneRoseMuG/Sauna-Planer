@@ -1,89 +1,168 @@
-import { sanitizeSauna } from "../domain/sauna.js";
+﻿import { sanitizeSauna } from "../domain/sauna.js";
 
-/** @type {import("../domain/sauna.js").Sauna[]} */
-let saunas = [];
+const DB_NAME = "sauna_planner_db";
+const DB_VERSION = 1;
+const SAUNAS_STORE = "saunas";
+const SETTINGS_STORE = "settings";
+
+/** @type {IDBDatabase | null} */
+let db = null;
+
+/**
+ * @returns {Promise<void>}
+ */
+export async function initStore() {
+  if (db) return;
+  db = await openDatabase();
+}
 
 /**
  * @returns {Promise<import("../domain/sauna.js").Sauna[]>}
  */
 export async function loadInitialData() {
-  try {
-    const response = await fetch("./data/saunas.json");
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const parsed = await response.json();
-    if (!Array.isArray(parsed)) {
-      throw new Error("JSON muss ein Array sein.");
-    }
-    saunas = parsed.map((item) => sanitizeSauna(item));
-  } catch (_error) {
-    saunas = [];
-  }
+  await initStore();
   return getAll();
 }
 
 /**
- * @returns {import("../domain/sauna.js").Sauna[]}
+ * @returns {Promise<import("../domain/sauna.js").Sauna[]>}
  */
-export function getAll() {
-  return saunas.map((item) => sanitizeSauna(item));
+export async function getAll() {
+  const database = await requireDb();
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(SAUNAS_STORE, "readonly");
+    const store = tx.objectStore(SAUNAS_STORE);
+    const request = store.getAll();
+
+    request.onsuccess = () => {
+      const list = Array.isArray(request.result) ? request.result : [];
+      const sanitized = list.map((item) => sanitizeSauna(item));
+      sanitized.sort((a, b) => a.name.localeCompare(b.name, "de"));
+      resolve(sanitized);
+    };
+    request.onerror = () => reject(request.error || new Error("Fehler beim Lesen der Sauna-Liste."));
+  });
 }
 
 /**
  * @param {string} id
- * @returns {import("../domain/sauna.js").Sauna | null}
+ * @returns {Promise<import("../domain/sauna.js").Sauna | null>}
  */
-export function getById(id) {
-  const found = saunas.find((item) => item.id === id);
-  return found ? sanitizeSauna(found) : null;
+export async function getById(id) {
+  const database = await requireDb();
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(SAUNAS_STORE, "readonly");
+    const store = tx.objectStore(SAUNAS_STORE);
+    const request = store.get(id);
+    request.onsuccess = () => resolve(request.result ? sanitizeSauna(request.result) : null);
+    request.onerror = () => reject(request.error || new Error("Fehler beim Lesen des Sauna-Datensatzes."));
+  });
 }
 
 /**
  * @param {import("../domain/sauna.js").Sauna} sauna
+ * @returns {Promise<void>}
  */
-export function upsert(sauna) {
+export async function upsert(sauna) {
   const sanitized = sanitizeSauna(sauna);
-  const index = saunas.findIndex((item) => item.id === sanitized.id);
-  if (index >= 0) {
-    saunas[index] = sanitized;
-    return;
-  }
-  saunas.push(sanitized);
+  await putSauna(sanitized);
 }
 
 /**
  * @param {string} id
- */
-export function remove(id) {
-  saunas = saunas.filter((item) => item.id !== id);
-}
-
-/**
- * @param {File} file
  * @returns {Promise<void>}
  */
-export async function importFromJsonFile(file) {
-  if (!file) {
-    throw new Error("Keine Datei ausgewaehlt.");
-  }
-  const text = await file.text();
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (_error) {
-    throw new Error("Datei enthaelt kein gueltiges JSON.");
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error("JSON muss ein Array von Sauna-Objekten enthalten.");
-  }
-  saunas = parsed.map((item) => sanitizeSauna(item));
+export async function remove(id) {
+  const database = await requireDb();
+  await new Promise((resolve, reject) => {
+    const tx = database.transaction(SAUNAS_STORE, "readwrite");
+    tx.oncomplete = () => resolve(undefined);
+    tx.onerror = () => reject(tx.error || new Error("Fehler beim Loeschen des Datensatzes."));
+    tx.objectStore(SAUNAS_STORE).delete(id);
+  });
 }
 
 /**
- * @returns {Blob}
+ * @param {import("../domain/sauna.js").Sauna[]} saunas
+ * @returns {Promise<void>}
  */
-export function exportToJsonBlob() {
-  const data = JSON.stringify(saunas, null, 2);
-  return new Blob([data], { type: "application/json" });
+export async function replaceAll(saunas) {
+  const database = await requireDb();
+  await new Promise((resolve, reject) => {
+    const tx = database.transaction(SAUNAS_STORE, "readwrite");
+    const store = tx.objectStore(SAUNAS_STORE);
+    store.clear();
+    for (const sauna of saunas) {
+      store.put(sanitizeSauna(sauna));
+    }
+    tx.oncomplete = () => resolve(undefined);
+    tx.onerror = () => reject(tx.error || new Error("Fehler beim Ersetzen der Datensaetze."));
+  });
 }
+
+/**
+ * @param {string} key
+ * @returns {Promise<any>}
+ */
+export async function getMeta(key) {
+  const database = await requireDb();
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(SETTINGS_STORE, "readonly");
+    const request = tx.objectStore(SETTINGS_STORE).get(key);
+    request.onsuccess = () => resolve(request.result ? request.result.value : undefined);
+    request.onerror = () => reject(request.error || new Error("Fehler beim Lesen von Metadaten."));
+  });
+}
+
+/**
+ * @param {string} key
+ * @param {any} value
+ * @returns {Promise<void>}
+ */
+export async function setMeta(key, value) {
+  const database = await requireDb();
+  await new Promise((resolve, reject) => {
+    const tx = database.transaction(SETTINGS_STORE, "readwrite");
+    tx.objectStore(SETTINGS_STORE).put({ key, value });
+    tx.oncomplete = () => resolve(undefined);
+    tx.onerror = () => reject(tx.error || new Error("Fehler beim Speichern von Metadaten."));
+  });
+}
+
+async function putSauna(sauna) {
+  const database = await requireDb();
+  await new Promise((resolve, reject) => {
+    const tx = database.transaction(SAUNAS_STORE, "readwrite");
+    tx.objectStore(SAUNAS_STORE).put(sauna);
+    tx.oncomplete = () => resolve(undefined);
+    tx.onerror = () => reject(tx.error || new Error("Fehler beim Speichern des Datensatzes."));
+  });
+}
+
+async function requireDb() {
+  await initStore();
+  if (!db) {
+    throw new Error("Datenbank konnte nicht initialisiert werden.");
+  }
+  return db;
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => reject(request.error || new Error("IndexedDB konnte nicht geoeffnet werden."));
+    request.onupgradeneeded = (event) => {
+      const database = event.target.result;
+      if (!database.objectStoreNames.contains(SAUNAS_STORE)) {
+        const saunasStore = database.createObjectStore(SAUNAS_STORE, { keyPath: "id" });
+        saunasStore.createIndex("name", "name", { unique: false });
+      }
+      if (!database.objectStoreNames.contains(SETTINGS_STORE)) {
+        database.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+

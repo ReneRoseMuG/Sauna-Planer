@@ -1,24 +1,22 @@
-import { IMAGE_MAX_BYTES, createEmptySauna, sanitizeSauna, validateSauna } from "./domain/sauna.js";
-import {
-  loadInitialData,
-  getAll,
-  getById,
-  upsert,
-  remove,
-  importFromJsonFile,
-  exportToJsonBlob,
-} from "./services/saunaStore.js";
+﻿import { IMAGE_MAX_BYTES, createEmptySauna, nextRevision, sanitizeSauna, validateSauna } from "./domain/sauna.js";
+import { loadInitialData, getAll, getById, upsert, remove } from "./services/saunaStore.js";
 import { generatePlanSvg } from "./services/planGenerator.js";
-import { exportSvgToPdf } from "./services/pdfExporter.js";
+import { exportPlan } from "./services/planExporter.js";
+import { composePlanDocument } from "./services/planLayoutEngine.js";
+import { getDefaultTemplate, getTemplateById, listTemplates } from "./services/templateRegistry.js";
+
+const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 const state = {
   selectedId: "",
+  saunas: [],
   dirty: false,
-  previewSvg: null,
   runtimeWarnings: [],
+  currentImages: [],
+  previewSvg: null,
+  composedDocument: null,
+  templates: listTemplates(),
 };
-
-const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 const elements = {
   saunaList: document.getElementById("sauna-list"),
@@ -33,16 +31,15 @@ const elements = {
   distanceList: document.getElementById("distance-list"),
   warningList: document.getElementById("warning-list"),
   preview: document.getElementById("svg-preview"),
+  imageUpload: document.getElementById("input-image-upload"),
+  imageGallery: document.getElementById("image-gallery"),
+  exportFormat: document.getElementById("field-export-format"),
+  templateId: document.getElementById("field-template-id"),
   btnNew: document.getElementById("btn-new"),
   btnDelete: document.getElementById("btn-delete"),
   btnSave: document.getElementById("btn-save"),
-  btnPdf: document.getElementById("btn-pdf"),
+  btnExport: document.getElementById("btn-export"),
   btnAddDistance: document.getElementById("btn-add-distance"),
-  jsonImport: document.getElementById("input-json-import"),
-  btnJsonExport: document.getElementById("btn-json-export"),
-  imageUpload: document.getElementById("input-image-upload"),
-  btnImageRemove: document.getElementById("btn-image-remove"),
-  imagePreview: document.getElementById("image-preview"),
 };
 
 init().catch((error) => {
@@ -50,51 +47,56 @@ init().catch((error) => {
 });
 
 async function init() {
+  renderTemplateOptions();
   await loadInitialData();
-  let saunas = getAll();
-  if (saunas.length === 0) {
-    const created = createEmptySauna();
-    upsert(created);
-    saunas = getAll();
-  }
+  await refreshSaunas();
 
-  state.selectedId = saunas[0].id;
+  state.selectedId = state.saunas.length > 0 ? state.saunas[0].id : "";
   bindEvents();
   renderSaunaList();
-  loadSelectedIntoForm();
+
+  if (state.selectedId) {
+    await loadSelectedIntoForm();
+  } else {
+    writeFormData(createEmptySauna());
+  }
+
   renderPreview();
 }
 
 function bindEvents() {
-  elements.btnNew.addEventListener("click", () => {
+  elements.btnNew.addEventListener("click", async () => {
+    state.runtimeWarnings = [];
     const created = createEmptySauna();
-    upsert(created);
+    await upsert(created);
+    await refreshSaunas();
     state.selectedId = created.id;
     state.dirty = false;
     renderSaunaList();
-    loadSelectedIntoForm();
+    await loadSelectedIntoForm();
     renderPreview();
   });
 
-  elements.btnDelete.addEventListener("click", () => {
+  elements.btnDelete.addEventListener("click", async () => {
     if (!state.selectedId) return;
-    remove(state.selectedId);
-    const all = getAll();
-    if (all.length === 0) {
-      const fallback = createEmptySauna();
-      upsert(fallback);
-      state.selectedId = fallback.id;
-    } else {
-      state.selectedId = all[0].id;
-    }
+    await remove(state.selectedId);
+    await refreshSaunas();
+
+    state.selectedId = state.saunas.length > 0 ? state.saunas[0].id : "";
     state.dirty = false;
+    state.runtimeWarnings = [];
     renderSaunaList();
-    loadSelectedIntoForm();
+
+    if (state.selectedId) {
+      await loadSelectedIntoForm();
+    } else {
+      writeFormData(createEmptySauna());
+    }
+
     renderPreview();
   });
 
   elements.btnAddDistance.addEventListener("click", () => {
-    state.runtimeWarnings = [];
     const data = readFormData();
     data.config.footDistances.push(80);
     writeFormData(data);
@@ -102,14 +104,28 @@ function bindEvents() {
     renderPreviewDebounced();
   });
 
-  elements.form.addEventListener("submit", (event) => {
+  elements.form.addEventListener("submit", async (event) => {
     event.preventDefault();
     state.runtimeWarnings = [];
-    const sauna = readFormData();
-    upsert(sauna);
-    state.selectedId = sauna.id;
+
+    const previous = await getById(elements.form.dataset.saunaId || "");
+    const raw = readFormData();
+
+    const prepared = sanitizeSauna({
+      ...raw,
+      createdAt: previous?.createdAt || raw.createdAt,
+      revision: previous?.revision || raw.revision,
+    });
+
+    const finalSauna = previous ? nextRevision(prepared) : prepared;
+
+    await upsert(finalSauna);
+    await refreshSaunas();
+
+    state.selectedId = finalSauna.id;
     state.dirty = false;
     renderSaunaList();
+    await loadSelectedIntoForm();
     renderPreview();
   });
 
@@ -120,9 +136,7 @@ function bindEvents() {
 
   elements.form.addEventListener("paste", async (event) => {
     const clipboardItems = event.clipboardData?.items;
-    if (!clipboardItems || clipboardItems.length === 0) {
-      return;
-    }
+    if (!clipboardItems || clipboardItems.length === 0) return;
 
     const imageItem = Array.from(clipboardItems).find((item) => item.type.startsWith("image/"));
     if (!imageItem) {
@@ -143,9 +157,9 @@ function bindEvents() {
   });
 
   elements.distanceList.addEventListener("click", (event) => {
-    state.runtimeWarnings = [];
     const button = event.target.closest("button[data-action='remove-distance']");
     if (!button) return;
+
     const index = Number(button.dataset.index);
     const data = readFormData();
     data.config.footDistances.splice(index, 1);
@@ -154,113 +168,112 @@ function bindEvents() {
     renderPreview();
   });
 
-  elements.saunaList.addEventListener("click", (event) => {
+  elements.saunaList.addEventListener("click", async (event) => {
     const button = event.target.closest("button[data-id]");
     if (!button) return;
+
     state.selectedId = button.dataset.id || "";
     state.dirty = false;
     state.runtimeWarnings = [];
     renderSaunaList();
-    loadSelectedIntoForm();
+    await loadSelectedIntoForm();
     renderPreview();
-  });
-
-  elements.btnPdf.addEventListener("click", async () => {
-    try {
-      if (!state.previewSvg) {
-        renderPreview();
-      }
-      const currentName = elements.name.value.trim() || "fundamentplan";
-      await exportSvgToPdf(state.previewSvg, { fileName: `fundamentplan_${currentName}.pdf` });
-    } catch (error) {
-      renderWarnings([`PDF-Export fehlgeschlagen: ${error.message}`]);
-    }
-  });
-
-  elements.jsonImport.addEventListener("change", async (event) => {
-    const input = /** @type {HTMLInputElement} */ (event.target);
-    const file = input.files && input.files[0];
-    if (!file) return;
-
-    try {
-      state.runtimeWarnings = [];
-      await importFromJsonFile(file);
-      const all = getAll();
-      if (all.length === 0) {
-        const fallback = createEmptySauna();
-        upsert(fallback);
-        state.selectedId = fallback.id;
-      } else {
-        state.selectedId = all[0].id;
-      }
-      state.dirty = false;
-      renderSaunaList();
-      loadSelectedIntoForm();
-      renderPreview();
-    } catch (error) {
-      renderWarnings([`JSON-Import fehlgeschlagen: ${error.message}`]);
-    } finally {
-      input.value = "";
-    }
-  });
-
-  elements.btnJsonExport.addEventListener("click", () => {
-    const blob = exportToJsonBlob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "saunas.json";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
   });
 
   elements.imageUpload.addEventListener("change", async (event) => {
     const input = /** @type {HTMLInputElement} */ (event.target);
     const file = input.files && input.files[0];
     if (!file) return;
+
     await handleImageFile(file, "Upload");
     input.value = "";
   });
 
-  elements.btnImageRemove.addEventListener("click", () => {
-    state.runtimeWarnings = [];
-    elements.form.dataset.imageDataUrl = "";
-    renderImagePreview("");
+  elements.imageGallery.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action='remove-image']");
+    if (!button) return;
+
+    const imageId = button.dataset.imageId || "";
+    state.currentImages = state.currentImages.filter((image) => image.id !== imageId);
+    renderImageGallery();
     state.dirty = true;
     renderPreview();
   });
+
+  elements.templateId.addEventListener("change", () => {
+    state.dirty = true;
+    renderPreview();
+  });
+
+  elements.exportFormat.addEventListener("change", () => {
+    state.dirty = true;
+    renderPreview();
+  });
+
+  elements.btnExport.addEventListener("click", async () => {
+    try {
+      if (!state.composedDocument) {
+        renderPreview();
+      }
+      const current = readFormData();
+      await exportPlan({
+        format: current.exportSettings.format,
+        composedDocument: state.composedDocument,
+        fileNameBase: `fundamentplan_${current.name}`,
+      });
+    } catch (error) {
+      renderWarnings([`Export fehlgeschlagen: ${error.message}`]);
+    }
+  });
+}
+
+async function refreshSaunas() {
+  state.saunas = await getAll();
+}
+
+function renderTemplateOptions() {
+  elements.templateId.innerHTML = "";
+  const templates = state.templates;
+  for (const template of templates) {
+    const option = document.createElement("option");
+    option.value = template.id;
+    option.textContent = template.label;
+    elements.templateId.appendChild(option);
+  }
 }
 
 function renderSaunaList() {
-  const all = getAll();
   elements.saunaList.innerHTML = "";
 
-  for (const sauna of all) {
+  for (const sauna of state.saunas) {
     const item = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.id = sauna.id;
-    const imageMarker = sauna.imageDataUrl ? " [Bild]" : "";
-    button.textContent =
-      `${sauna.name}${imageMarker} (${format(sauna.config.barrelLength)} x ${format(sauna.config.barrelWidth)} cm)`;
+
+    const imageMarker = sauna.images.length > 0 ? " [Bilder]" : "";
+    button.textContent = `${sauna.name}${imageMarker} (r${sauna.revision}, ${format(sauna.config.barrelLength)} x ${format(sauna.config.barrelWidth)} cm)`;
+
     if (sauna.id === state.selectedId) {
       button.classList.add("active");
     }
+
     item.appendChild(button);
     elements.saunaList.appendChild(item);
   }
 }
 
-function loadSelectedIntoForm() {
-  const sauna = getById(state.selectedId);
+async function loadSelectedIntoForm() {
+  const sauna = await getById(state.selectedId);
   if (!sauna) return;
   writeFormData(sauna);
 }
 
 function writeFormData(sauna) {
   elements.form.dataset.saunaId = sauna.id;
+  elements.form.dataset.createdAt = sauna.createdAt;
+  elements.form.dataset.revision = String(sauna.revision);
+
   elements.name.value = sauna.name;
   elements.barrelLength.value = String(sauna.config.barrelLength);
   elements.barrelWidth.value = String(sauna.config.barrelWidth);
@@ -268,8 +281,12 @@ function writeFormData(sauna) {
   elements.footThickness.value = String(sauna.config.footThickness);
   elements.foundationWidth.value = String(sauna.config.foundationWidth);
   elements.foundationDepth.value = String(sauna.config.foundationDepth);
-  elements.form.dataset.imageDataUrl = sauna.imageDataUrl || "";
-  renderImagePreview(sauna.imageDataUrl || "");
+
+  elements.exportFormat.value = sauna.exportSettings.format;
+  elements.templateId.value = sauna.exportSettings.templateId;
+
+  state.currentImages = Array.isArray(sauna.images) ? [...sauna.images] : [];
+  renderImageGallery();
 
   elements.distanceList.innerHTML = "";
   sauna.config.footDistances.forEach((distance, index) => {
@@ -282,10 +299,6 @@ function writeFormData(sauna) {
     input.step = "0.1";
     input.value = String(distance);
     input.dataset.index = String(index);
-    input.addEventListener("input", () => {
-      state.dirty = true;
-      renderPreviewDebounced();
-    });
 
     const removeButton = document.createElement("button");
     removeButton.type = "button";
@@ -302,10 +315,18 @@ function writeFormData(sauna) {
 function readFormData() {
   const id = elements.form.dataset.saunaId || createEmptySauna().id;
   const distances = Array.from(elements.distanceList.querySelectorAll("input")).map((input) => parseNumber(input.value));
+
   return sanitizeSauna({
     id,
     name: elements.name.value,
-    imageDataUrl: elements.form.dataset.imageDataUrl || "",
+    revision: Number(elements.form.dataset.revision) || 1,
+    createdAt: elements.form.dataset.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    images: state.currentImages,
+    exportSettings: {
+      templateId: elements.templateId.value || getDefaultTemplate().id,
+      format: elements.exportFormat.value === "svg" ? "svg" : "pdf",
+    },
     config: {
       barrelLength: parseNumber(elements.barrelLength.value),
       barrelWidth: parseNumber(elements.barrelWidth.value),
@@ -322,11 +343,34 @@ function renderPreview() {
   const sauna = readFormData();
   const validation = validateSauna(sauna);
   const plan = generatePlanSvg(sauna.config, { title: `Fundamentplan ${sauna.name}` });
+
+  const template = getTemplateById(sauna.exportSettings.templateId);
+  const composed = composePlanDocument({
+    template,
+    planSvg: plan.svgElement,
+    planGeometryBounds: plan.geometryBounds,
+    planAnnotationBounds: plan.annotationBounds,
+    meta: {
+      title: "Fundamentplan",
+      modelName: sauna.name,
+    },
+    notes: [
+      "Alle Masse in cm (ca.-Angaben).",
+      "Fuesse und Fundamentstreifen sind als Draufsicht dargestellt.",
+    ],
+  });
+
   const warnings = [...state.runtimeWarnings, ...validation.warnings, ...plan.warnings];
+  if (composed.fit.warning) {
+    warnings.push(composed.fit.warning);
+  }
 
   elements.preview.innerHTML = "";
-  elements.preview.appendChild(plan.svgElement);
+  elements.preview.appendChild(composed.svgElement);
+
   state.previewSvg = plan.svgElement;
+  state.composedDocument = composed;
+
   renderWarnings(warnings);
 }
 
@@ -348,41 +392,39 @@ function renderWarnings(warnings) {
   }
 }
 
-function parseNumber(raw) {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    return 0;
-  }
-  return parsed;
-}
+function renderImageGallery() {
+  elements.imageGallery.innerHTML = "";
 
-function debounce(fn, waitMs) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), waitMs);
-  };
-}
-
-function format(value) {
-  const n = Number(value) || 0;
-  return Number.isInteger(n) ? String(n) : n.toFixed(2);
-}
-
-function renderImagePreview(imageDataUrl) {
-  elements.imagePreview.innerHTML = "";
-  if (!imageDataUrl) {
+  if (state.currentImages.length === 0) {
     const placeholder = document.createElement("span");
     placeholder.className = "image-placeholder";
     placeholder.textContent = "Kein Bild hinterlegt.";
-    elements.imagePreview.appendChild(placeholder);
+    elements.imageGallery.appendChild(placeholder);
     return;
   }
 
-  const image = document.createElement("img");
-  image.src = imageDataUrl;
-  image.alt = "Referenzbild der Sauna";
-  elements.imagePreview.appendChild(image);
+  for (const image of state.currentImages) {
+    const card = document.createElement("div");
+    card.className = "image-card";
+
+    const img = document.createElement("img");
+    img.src = image.dataUrl;
+    img.alt = image.label || "Sauna-Bild";
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "toolbar";
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.dataset.action = "remove-image";
+    removeButton.dataset.imageId = image.id;
+    removeButton.textContent = "Bild entfernen";
+
+    toolbar.appendChild(removeButton);
+    card.appendChild(img);
+    card.appendChild(toolbar);
+    elements.imageGallery.appendChild(card);
+  }
 }
 
 async function handleImageFile(file, sourceLabel) {
@@ -409,10 +451,18 @@ async function handleImageFile(file, sourceLabel) {
       renderPreview();
       return;
     }
-    elements.form.dataset.imageDataUrl = dataUrl;
-    renderImagePreview(dataUrl);
+
+    state.currentImages.push({
+      id: `img-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+      dataUrl,
+      mimeType: file.type,
+      bytes: file.size,
+      createdAt: new Date().toISOString(),
+    });
+
     state.dirty = true;
     state.runtimeWarnings = [];
+    renderImageGallery();
     renderPreview();
   } catch (error) {
     setRuntimeWarnings([`${sourceLabel}: Bild konnte nicht gelesen werden (${error.message}).`]);
@@ -432,3 +482,27 @@ function readFileAsDataUrl(file) {
     reader.readAsDataURL(file);
   });
 }
+
+function parseNumber(raw) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return parsed;
+}
+
+function debounce(fn, waitMs) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), waitMs);
+  };
+}
+
+function format(value) {
+  const n = Number(value) || 0;
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+
+

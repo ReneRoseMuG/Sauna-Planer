@@ -1,8 +1,8 @@
-const MM_PER_PX_AT_96_DPI = 25.4 / 96;
+﻿const MM_PER_PX_AT_96_DPI = 25.4 / 96;
 
 /**
  * @param {SVGSVGElement} svgElement
- * @param {{ fileName?: string }=} meta
+ * @param {{ fileName?: string, pageMm?: { width:number, height:number } }=} meta
  * @returns {Promise<void>}
  */
 export async function exportSvgToPdf(svgElement, meta = {}) {
@@ -16,15 +16,22 @@ export async function exportSvgToPdf(svgElement, meta = {}) {
   }
 
   const { jsPDF } = jsPdfNamespace;
+
+  const pageMm = meta.pageMm && meta.pageMm.width > 0 && meta.pageMm.height > 0
+    ? meta.pageMm
+    : inferPageMm(svgElement);
+
+  const orientation = pageMm.width > pageMm.height ? "landscape" : "portrait";
+
   const doc = new jsPDF({
-    orientation: "portrait",
+    orientation,
     unit: "mm",
-    format: "a4",
+    format: [pageMm.width, pageMm.height],
   });
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 12;
+  const margin = 6;
 
   const cloned = /** @type {SVGSVGElement} */ (svgElement.cloneNode(true));
   const viewBox = cloned.viewBox?.baseVal;
@@ -61,6 +68,16 @@ export async function exportSvgToPdf(svgElement, meta = {}) {
 
   const safeName = sanitizeFileName(meta.fileName || "fundamentplan.pdf");
   doc.save(safeName);
+}
+
+function inferPageMm(svgElement) {
+  const vb = svgElement.viewBox?.baseVal;
+  const wPx = vb && vb.width > 0 ? vb.width : parseFloat(svgElement.getAttribute("width")) || 1000;
+  const hPx = vb && vb.height > 0 ? vb.height : parseFloat(svgElement.getAttribute("height")) || 1400;
+  return {
+    width: wPx * MM_PER_PX_AT_96_DPI,
+    height: hPx * MM_PER_PX_AT_96_DPI,
+  };
 }
 
 function sanitizeFileName(name) {
