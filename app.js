@@ -364,7 +364,7 @@ function renderPreview() {
     },
     notes: [
       "Alle Masse in cm (ca.-Angaben).",
-      "Fuesse und Fundamentstreifen sind als Draufsicht dargestellt.",
+      "F\u00FC\u00DFe und Fundamentstreifen sind als Draufsicht dargestellt.",
     ],
   });
 
