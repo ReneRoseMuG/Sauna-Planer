@@ -1,6 +1,6 @@
 const MM_TO_PX = 96 / 25.4;
 const SVG_NS = "http://www.w3.org/2000/svg";
-const TARGET_FILL_RATIO = 0.7;
+const TARGET_FILL_RATIO = 0.98;
 const MIN_DOMINANT_COVERAGE = 2 / 3;
 
 /**
@@ -144,7 +144,8 @@ export function composePlanDocument({ template, planSvg, planGeometryBounds, pla
 
 function buildFitTransform(planSvg, slot, planGeometryBounds, planAnnotationBounds, pageOrientation) {
   const fallbackBounds = getBoundsFromViewBox(planSvg);
-  let sourceBounds = normalizeBounds(planGeometryBounds);
+  const geometryBounds = normalizeBounds(planGeometryBounds);
+  let sourceBounds = geometryBounds;
   let warning = "";
 
   if (!sourceBounds) {
@@ -153,6 +154,9 @@ function buildFitTransform(planSvg, slot, planGeometryBounds, planAnnotationBoun
   }
 
   const annotationBounds = normalizeBounds(planAnnotationBounds);
+  if (annotationBounds) {
+    sourceBounds = unionBounds(sourceBounds, annotationBounds);
+  }
   // Keine automatische 90°-Drehung im Hochformat:
   // Breite bleibt auf X-Achse, Laenge auf Y-Achse.
   const orientedWidth = sourceBounds.width;
@@ -180,7 +184,7 @@ function buildFitTransform(planSvg, slot, planGeometryBounds, planAnnotationBoun
   };
 
   if (coverage.dominantCoverage < MIN_DOMINANT_COVERAGE) {
-    warning = prependWarning(warning, "Info: Dominante Geometrieabdeckung < 66,7%.");
+    warning = prependWarning(warning, "Info: Dominante Containerabdeckung < 66,7%.");
   }
 
   const minX = sourceBounds.xMin;
@@ -202,6 +206,15 @@ function buildFitTransform(planSvg, slot, planGeometryBounds, planAnnotationBoun
     projectX,
     projectY,
   };
+}
+
+function unionBounds(a, b) {
+  return createBounds(
+    Math.min(a.minX, b.minX),
+    Math.min(a.minY, b.minY),
+    Math.max(a.maxX, b.maxX),
+    Math.max(a.maxY, b.maxY)
+  );
 }
 
 function resolveGroup(planSvg, selector, groupName) {
