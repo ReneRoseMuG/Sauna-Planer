@@ -1,5 +1,6 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const SCALE = 10; // 1 cm = 10 SVG units
+const DEFAULT_DIM_TEXT_FONT_SIZE_PX = 13;
 
 /**
  * @typedef {Object} PlanMetrics
@@ -39,7 +40,7 @@ export function computeDerivedDimensions(saunaConfig) {
 
 /**
  * @param {import("../domain/sauna.js").SaunaConfig} saunaConfig
- * @param {{title?: string}=} options
+ * @param {{title?: string, typography?: { dimTextFontSizePx?: number }}=} options
  * @returns {{
  *   svgElement: SVGSVGElement,
  *   metrics: PlanMetrics,
@@ -88,6 +89,8 @@ export function generatePlanSvg(saunaConfig, options = {}) {
     warnings.push("Hinweis: Fuer die Reihen-Variante werden mindestens 3 Fuesse (footDistances.length >= 2) empfohlen.");
   }
 
+  const dimTextFontSizePx = Math.max(9, Number(options.typography?.dimTextFontSizePx) || DEFAULT_DIM_TEXT_FONT_SIZE_PX);
+
   const svg = createEl("svg", {
     xmlns: SVG_NS,
     role: "img",
@@ -95,7 +98,7 @@ export function generatePlanSvg(saunaConfig, options = {}) {
   });
 
   svg.appendChild(createDefs());
-  svg.appendChild(createStyle());
+  svg.appendChild(createStyle(dimTextFontSizePx));
 
   const gGeometry = createEl("g", { class: "geometry-group layer-geometry", "data-group": "geometry" });
   const gAnnotation = createEl("g", { class: "annotation-group layer-annotation", "data-group": "annotation" });
@@ -176,9 +179,9 @@ export function generatePlanSvg(saunaConfig, options = {}) {
     annotationMaxY = Math.max(annotationMaxY, bounds.maxY);
   };
 
-  const baseDimRefX = Math.max(geometryMaxX, barrelMaxX);
-  const segmentOffsetX = cm(22);
-  const totalOffsetX = cm(36);
+  const rightDimRefX = Math.max(geometryMaxX, barrelMaxX);
+  const rightSegmentOffsetX = cm(22);
+  const rightBarrelLengthOffsetX = cm(50); // ganz rechts aussen
   const leftDimRefX = -foundationSizeX / 2;
   const leftDetailOffsetX = -cm(30);
   const leftOverallOffsetX = -cm(44);
@@ -210,6 +213,7 @@ export function generatePlanSvg(saunaConfig, options = {}) {
         textXOverride: leftTextX,
         textAnchorOverride: "end",
         rotateText: false,
+        fontSizePx: dimTextFontSizePx,
       })
     );
 
@@ -228,6 +232,7 @@ export function generatePlanSvg(saunaConfig, options = {}) {
         textXOverride: leftTextX,
         textAnchorOverride: "end",
         rotateText: false,
+        fontSizePx: dimTextFontSizePx,
       })
     );
 
@@ -246,6 +251,7 @@ export function generatePlanSvg(saunaConfig, options = {}) {
         textXOverride: leftTextX,
         textAnchorOverride: "end",
         rotateText: false,
+        fontSizePx: dimTextFontSizePx,
       })
     );
 
@@ -264,50 +270,32 @@ export function generatePlanSvg(saunaConfig, options = {}) {
         textXOverride: leftOverallTextX,
         textAnchorOverride: "end",
         rotateText: false,
+        fontSizePx: dimTextFontSizePx,
       })
     );
   }
 
-  // Segmentmasse (Innenkante zu Innenkante) entlang der Y-Achse
+  // Rechts: Segmentmasse (Innenkante zu Innenkante) entlang der Y-Achse
   for (let i = 0; i < footCenterYUp.length - 1; i += 1) {
     const yInnerUpperCurrentUp = footCenterYUp[i] + footSizeY / 2;
     const yInnerLowerNextUp = footCenterYUp[i + 1] - footSizeY / 2;
 
     trackAnnotation(
       drawDimension({
-        x1: baseDimRefX,
+        x1: rightDimRefX,
         y1: yUpToSvg(yInnerUpperCurrentUp),
-        x2: baseDimRefX,
+        x2: rightDimRefX,
         y2: yUpToSvg(yInnerLowerNextUp),
-        offset: segmentOffsetX,
+        offset: rightSegmentOffsetX,
         text: `${formatCm(footDistancesCm[i])}`,
         orientation: "vertical",
         guidesGroup: gGuides,
         dimGroup: gDims,
         textGroup: gText,
+        fontSizePx: dimTextFontSizePx,
       })
     );
   }
-
-  // Gesamtmass der Fussreihe: Sum(footDistances) + footCount * footSizeY
-  const totalStartYUp = footCenterYUp[0] - footSizeY / 2;
-  const totalEndYUp = footCenterYUp[footCenterYUp.length - 1] + footSizeY / 2;
-  const totalFootSpanCm = footDistancesCm.reduce((sum, value) => sum + value, 0) + footCount * (Number(saunaConfig.footThickness) || 0);
-
-  trackAnnotation(
-    drawDimension({
-      x1: baseDimRefX,
-      y1: yUpToSvg(totalStartYUp),
-      x2: baseDimRefX,
-      y2: yUpToSvg(totalEndYUp),
-      offset: totalOffsetX,
-      text: `${formatCm(totalFootSpanCm)}`,
-      orientation: "vertical",
-      guidesGroup: gGuides,
-      dimGroup: gDims,
-      textGroup: gText,
-    })
-  );
 
   // Fussbreite (X) ueber der Fassbreiten-Bemassung
   trackAnnotation(
@@ -322,6 +310,7 @@ export function generatePlanSvg(saunaConfig, options = {}) {
       guidesGroup: gGuides,
       dimGroup: gDims,
       textGroup: gText,
+      fontSizePx: dimTextFontSizePx,
     })
   );
 
@@ -339,21 +328,24 @@ export function generatePlanSvg(saunaConfig, options = {}) {
       dimGroup: gDims,
       textGroup: gText,
       textOffsetOverride: cm(6),
+      fontSizePx: dimTextFontSizePx,
     })
   );
 
+  // Rechts ganz aussen: Fasslaenge
   trackAnnotation(
     drawDimension({
-      x1: barrelMaxX,
+      x1: rightDimRefX,
       y1: barrelY,
-      x2: barrelMaxX,
+      x2: rightDimRefX,
       y2: barrelMaxY,
-      offset: cm(20),
+      offset: rightBarrelLengthOffsetX,
       text: `${formatCm(Number(saunaConfig.barrelLength) || 0)}`,
       orientation: "vertical",
       guidesGroup: gGuides,
       dimGroup: gDims,
       textGroup: gText,
+      fontSizePx: dimTextFontSizePx,
     })
   );
 
@@ -390,13 +382,14 @@ function drawDimension({
   textAnchorOverride,
   textOffsetOverride,
   rotateText = true,
+  fontSizePx = DEFAULT_DIM_TEXT_FONT_SIZE_PX,
 }) {
   const extensionOvershoot = cm(0.8); // 8 mm
   const objectGap = cm(0.4); // 4 mm
   const defaultTextOffset = cm(2.8);
   const textOffset = Number.isFinite(Number(textOffsetOverride)) ? Number(textOffsetOverride) : defaultTextOffset;
   const markerPad = cm(1.8);
-  const fontSize = 15;
+  const fontSize = Math.max(9, Number(fontSizePx) || DEFAULT_DIM_TEXT_FONT_SIZE_PX);
 
   if (orientation === "horizontal") {
     const direction = offset >= 0 ? 1 : -1;
@@ -478,7 +471,7 @@ function drawDimension({
   };
 }
 
-function createStyle() {
+function createStyle(dimTextFontSizePx) {
   const style = createEl("style");
   style.textContent = `
     .layer-barrel rect {
@@ -516,7 +509,7 @@ function createStyle() {
     .layer-text text {
       fill: #111827;
       font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: 15px;
+      font-size: ${dimTextFontSizePx}px;
       font-weight: 600;
     }
   `;

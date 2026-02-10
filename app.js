@@ -35,6 +35,7 @@ const elements = {
   imageGallery: document.getElementById("image-gallery"),
   exportFormat: document.getElementById("field-export-format"),
   templateId: document.getElementById("field-template-id"),
+  dimFontSize: document.getElementById("field-dim-font-size"),
   btnNew: document.getElementById("btn-new"),
   btnDelete: document.getElementById("btn-delete"),
   btnSave: document.getElementById("btn-save"),
@@ -284,6 +285,7 @@ function writeFormData(sauna) {
 
   elements.exportFormat.value = sauna.exportSettings.format;
   elements.templateId.value = sauna.exportSettings.templateId;
+  elements.dimFontSize.value = String(sauna.exportSettings.dimTextFontSizePx ?? 12);
 
   state.currentImages = Array.isArray(sauna.images) ? [...sauna.images] : [];
   renderImageGallery();
@@ -326,6 +328,7 @@ function readFormData() {
     exportSettings: {
       templateId: elements.templateId.value || getDefaultTemplate().id,
       format: elements.exportFormat.value === "svg" ? "svg" : "pdf",
+      dimTextFontSizePx: parseNumber(elements.dimFontSize.value) || 12,
     },
     config: {
       barrelLength: parseNumber(elements.barrelLength.value),
@@ -342,7 +345,12 @@ function readFormData() {
 function renderPreview() {
   const sauna = readFormData();
   const validation = validateSauna(sauna);
-  const plan = generatePlanSvg(sauna.config, { title: `Fundamentplan ${sauna.name}` });
+  const plan = generatePlanSvg(sauna.config, {
+    title: `Fundamentplan ${sauna.name}`,
+    typography: {
+      dimTextFontSizePx: sauna.exportSettings.dimTextFontSizePx,
+    },
+  });
 
   const template = getTemplateById(sauna.exportSettings.templateId);
   const composed = composePlanDocument({
