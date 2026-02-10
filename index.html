@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fundamentplan-Generator fuer Fasssaunen</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.5.0/dist/svg2pdf.umd.min.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="panel panel-list">
+        <h1>Sauna-Modelle</h1>
+        <div class="toolbar">
+          <button id="btn-new" type="button">Neu</button>
+          <button id="btn-delete" type="button">Loeschen</button>
+        </div>
+        <div class="toolbar">
+          <label class="file-button">
+            JSON laden
+            <input id="input-json-import" type="file" accept="application/json" />
+          </label>
+          <button id="btn-json-export" type="button">JSON speichern</button>
+        </div>
+        <ul id="sauna-list" class="sauna-list"></ul>
+      </aside>
+
+      <main class="panel panel-editor">
+        <h2>Plan-Konfiguration</h2>
+        <form id="sauna-form" autocomplete="off">
+          <div class="form-grid">
+            <label>Name
+              <input id="field-name" name="name" type="text" required />
+            </label>
+            <label>Fasslaenge (cm)
+              <input id="field-barrel-length" name="barrelLength" type="number" step="0.1" min="0" />
+            </label>
+            <label>Fassbreite (cm)
+              <input id="field-barrel-width" name="barrelWidth" type="number" step="0.1" min="0" />
+            </label>
+            <label>Fussbreite (cm)
+              <input id="field-foot-width" name="footWidth" type="number" step="0.1" min="0" />
+            </label>
+            <label>Fussdicke (cm)
+              <input id="field-foot-thickness" name="footThickness" type="number" step="0.1" min="0" />
+            </label>
+            <label>Fundamentbreite (cm)
+              <input id="field-foundation-width" name="foundationWidth" type="number" step="0.1" min="0" />
+            </label>
+            <label>Frosttiefe (cm)
+              <input id="field-foundation-depth" name="foundationDepth" type="number" step="0.1" min="0" />
+            </label>
+          </div>
+
+          <section class="distance-section">
+            <div class="distance-header">
+              <h3>Fussabstaende (Innenkante zu Innenkante)</h3>
+              <button id="btn-add-distance" type="button">Abstand hinzufuegen</button>
+            </div>
+            <div id="distance-list" class="distance-list"></div>
+          </section>
+
+          <section class="distance-section">
+            <div class="distance-header">
+              <h3>Referenzbild</h3>
+            </div>
+            <div class="toolbar">
+              <label class="file-button">
+                Bild hochladen
+                <input id="input-image-upload" type="file" accept="image/png,image/jpeg,image/webp" />
+              </label>
+              <button id="btn-image-remove" type="button">Bild entfernen</button>
+            </div>
+            <p class="hint-text">Oder Bild aus Zwischenablage einfuegen (Ctrl+V)</p>
+            <div id="image-preview" class="image-preview">
+              <span class="image-placeholder">Kein Bild hinterlegt.</span>
+            </div>
+          </section>
+
+          <div class="toolbar">
+            <button id="btn-save" type="submit">Speichern</button>
+            <button id="btn-pdf" type="button">PDF erzeugen</button>
+          </div>
+        </form>
+
+        <section>
+          <h3>Hinweise</h3>
+          <ul id="warning-list" class="warning-list"></ul>
+        </section>
+
+        <section>
+          <h3>Vorschau (SVG)</h3>
+          <div id="svg-preview" class="svg-preview"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

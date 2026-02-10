@@ -1,0 +1,28 @@
+[
+  {
+    "id": "sauna-seed-1",
+    "name": "Fasssauna Standard 220",
+    "config": {
+      "barrelLength": 220,
+      "barrelWidth": 210,
+      "footWidth": 200,
+      "footThickness": 8,
+      "foundationWidth": 40,
+      "foundationDepth": 80,
+      "footDistances": [79, 100, 79]
+    }
+  },
+  {
+    "id": "sauna-seed-2",
+    "name": "Fasssauna Kompakt 180",
+    "config": {
+      "barrelLength": 180,
+      "barrelWidth": 195,
+      "footWidth": 180,
+      "footThickness": 8,
+      "foundationWidth": 35,
+      "foundationDepth": 80,
+      "footDistances": [85, 85]
+    }
+  }
+]

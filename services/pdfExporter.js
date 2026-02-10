@@ -1,0 +1,69 @@
+const MM_PER_PX_AT_96_DPI = 25.4 / 96;
+
+/**
+ * @param {SVGSVGElement} svgElement
+ * @param {{ fileName?: string }=} meta
+ * @returns {Promise<void>}
+ */
+export async function exportSvgToPdf(svgElement, meta = {}) {
+  if (!(svgElement instanceof SVGSVGElement)) {
+    throw new Error("Kein gueltiges SVG fuer den PDF-Export vorhanden.");
+  }
+
+  const jsPdfNamespace = window.jspdf;
+  if (!jsPdfNamespace || !jsPdfNamespace.jsPDF) {
+    throw new Error("jsPDF ist nicht geladen.");
+  }
+
+  const { jsPDF } = jsPdfNamespace;
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+
+  const cloned = /** @type {SVGSVGElement} */ (svgElement.cloneNode(true));
+  const viewBox = cloned.viewBox?.baseVal;
+  const vbWidth = viewBox && viewBox.width > 0 ? viewBox.width : parseFloat(cloned.getAttribute("width")) || 1000;
+  const vbHeight = viewBox && viewBox.height > 0 ? viewBox.height : parseFloat(cloned.getAttribute("height")) || 1000;
+
+  const sourceWidthMm = vbWidth * MM_PER_PX_AT_96_DPI;
+  const sourceHeightMm = vbHeight * MM_PER_PX_AT_96_DPI;
+  const drawWidth = pageWidth - margin * 2;
+  const drawHeight = pageHeight - margin * 2;
+  const scale = Math.min(drawWidth / sourceWidthMm, drawHeight / sourceHeightMm);
+  const targetWidth = sourceWidthMm * scale;
+  const targetHeight = sourceHeightMm * scale;
+  const offsetX = (pageWidth - targetWidth) / 2;
+  const offsetY = (pageHeight - targetHeight) / 2;
+
+  if (typeof doc.svg === "function") {
+    await doc.svg(cloned, {
+      x: offsetX,
+      y: offsetY,
+      width: targetWidth,
+      height: targetHeight,
+    });
+  } else if (typeof window.svg2pdf === "function") {
+    doc.saveGraphicsState();
+    doc.setCurrentTransformationMatrix(
+      doc.Matrix(scale, 0, 0, scale, offsetX / MM_PER_PX_AT_96_DPI, offsetY / MM_PER_PX_AT_96_DPI)
+    );
+    window.svg2pdf(cloned, doc, { xOffset: 0, yOffset: 0, scale: 1 });
+    doc.restoreGraphicsState();
+  } else {
+    throw new Error("Weder jsPDF.svg noch svg2pdf ist verfuegbar.");
+  }
+
+  const safeName = sanitizeFileName(meta.fileName || "fundamentplan.pdf");
+  doc.save(safeName);
+}
+
+function sanitizeFileName(name) {
+  const cleaned = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return cleaned.endsWith(".pdf") ? cleaned : `${cleaned}.pdf`;
+}
