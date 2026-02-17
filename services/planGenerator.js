@@ -88,7 +88,8 @@ export function generatePlanSvg(saunaConfig, options = {}) {
   if (fundamentBreite <= 0) warnings.push("Warnung: Fundamentbreite ist ungueltig (<= 0).");
   if (footDistances.length < 1) warnings.push("Hinweis: Mindestens 2 Fuesse (1 Abstand) empfohlen.");
 
-  const dimFontSize = Math.max(8, Number(options.typography?.dimTextFontSizePx) || 9);
+  // User-Eingabe ist in px; SVG-Koordinatensystem ist in cm → durch 3 teilen
+  const dimFontSize = Math.max(1.5, (Number(options.typography?.dimTextFontSizePx) || 9) / 3);
   const title = options.title || "Fundamentplan";
 
   // ------------------------------------------------------------------
@@ -136,7 +137,8 @@ export function generatePlanSvg(saunaConfig, options = {}) {
   const diagramYMax = yMax;
 
   // SVG uses Y-down, Python uses Y-up → flip Y
-  const flipY = (y) => diagramYMax - y + diagramYMin;
+  // Maps: pythonTop (diagramYMax) → svgY=0, pythonBottom (diagramYMin) → svgY=svgHeight
+  const flipY = (y) => diagramYMax - y;
 
   const svgWidth = diagramXMax - diagramXMin;
   const svgHeight = diagramYMax - diagramYMin;
@@ -265,14 +267,14 @@ export function generatePlanSvg(saunaConfig, options = {}) {
   if (fundamentPositionen.length > 0) {
     const yStartFirst = fundamentPositionen[0].yStart;
     const yEndLast = fundamentPositionen[fundamentPositionen.length - 1].yEnd;
-    drawVerticalMeasure(gMeasures, posRechtsAussen, yStartFirst, yEndLast, `${fmt(yEndLast - yStartFirst)}cm`, "blue", "left", 12, flipY);
+    drawVerticalMeasure(gMeasures, posRechtsAussen, yStartFirst, yEndLast, `${fmt(yEndLast - yStartFirst)}cm`, "blue", "left", 4.5, flipY);
   }
 
   // Rechts außen: Arbeitsbereich-Höhe (red)
-  drawVerticalMeasure(gMeasures, posRechtsAussen, arbeitYStart, arbeitYEnd, `${fmt(WORK_AREA_HEIGHT)}`, "red", "left", 10, flipY);
+  drawVerticalMeasure(gMeasures, posRechtsAussen, arbeitYStart, arbeitYEnd, `${fmt(WORK_AREA_HEIGHT)}`, "red", "left", 3.5, flipY);
 
   // Unten: Breite (purple)
-  drawHorizontalMeasure(gMeasures, posUnten, 0, breiteCm, `${fmt(breiteCm)}`, "purple", "below", 11, flipY);
+  drawHorizontalMeasure(gMeasures, posUnten, 0, breiteCm, `${fmt(breiteCm)}`, "purple", "below", 4, flipY);
 
   // ------------------------------------------------------------------
   // 10. Legende (oben links, wie Python)
@@ -285,8 +287,8 @@ export function generatePlanSvg(saunaConfig, options = {}) {
       { color: "red", text: "Arbeitsbereich Monteur/Elektriker" },
     ];
 
-    const boxW = 15;
-    const boxH = 8;
+    const boxW = 6;
+    const boxH = 3;
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -385,8 +387,8 @@ function drawVerticalMeasure(parent, xPos, yStartUp, yEndUp, label, color, textS
     x1: xPos, y1: yTop, x2: xPos, y2: yBottom,
     stroke: color,
     "stroke-width": 1.5,
-    "marker-start": "url(#arrow-start)",
-    "marker-end": "url(#arrow-end)",
+    "marker-start": "url(#dim-arrow)",
+    "marker-end": "url(#dim-arrow)",
   }));
 
   // Beschriftung
@@ -438,8 +440,8 @@ function drawHorizontalMeasure(parent, yPosUp, xStart, xEnd, label, color, textS
     x1: xStart, y1: yArrow, x2: xEnd, y2: yArrow,
     stroke: color,
     "stroke-width": 1.5,
-    "marker-start": "url(#arrow-start)",
-    "marker-end": "url(#arrow-end)",
+    "marker-start": "url(#dim-arrow)",
+    "marker-end": "url(#dim-arrow)",
   }));
 
   // Beschriftung
@@ -490,7 +492,7 @@ function createStyleElement(dimFontSize) {
     .fuss-label {
       fill: white;
       font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: 9px;
+      font-size: 3px;
       font-weight: bold;
       pointer-events: none;
     }
@@ -514,12 +516,12 @@ function createStyleElement(dimFontSize) {
     .legend-text {
       fill: #111;
       font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: 9px;
+      font-size: 3.5px;
     }
     .headline {
       fill: #111;
       font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: 14px;
+      font-size: 5px;
       font-weight: bold;
     }
     .layer-grid line {
@@ -534,33 +536,21 @@ function createStyleElement(dimFontSize) {
 function createDefs() {
   const defs = createEl("defs");
 
-  // Arrow marker - start (pointing backward)
-  const markerStart = createEl("marker", {
-    id: "arrow-start",
+  // Single arrow marker: auto-start-reverse spiegelt automatisch bei marker-start
+  // → marker-end: zeigt in Linienrichtung, marker-start: zeigt gegen Linienrichtung
+  // Ergebnis: <-> Doppelpfeil
+  const marker = createEl("marker", {
+    id: "dim-arrow",
     viewBox: "0 0 10 10",
-    refX: "1",
+    refX: "5",
     refY: "5",
-    markerWidth: "6",
-    markerHeight: "6",
+    markerWidth: "4",
+    markerHeight: "3",
     orient: "auto-start-reverse",
-    markerUnits: "strokeWidth",
+    markerUnits: "userSpaceOnUse",
   });
-  markerStart.appendChild(createEl("path", { d: "M 10 0 L 0 5 L 10 10 z", fill: "currentColor" }));
-  defs.appendChild(markerStart);
-
-  // Arrow marker - end (pointing forward)
-  const markerEnd = createEl("marker", {
-    id: "arrow-end",
-    viewBox: "0 0 10 10",
-    refX: "9",
-    refY: "5",
-    markerWidth: "6",
-    markerHeight: "6",
-    orient: "auto",
-    markerUnits: "strokeWidth",
-  });
-  markerEnd.appendChild(createEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "currentColor" }));
-  defs.appendChild(markerEnd);
+  marker.appendChild(createEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "currentColor" }));
+  defs.appendChild(marker);
 
   return defs;
 }
