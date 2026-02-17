@@ -317,13 +317,8 @@ function renderSaunaTiles() {
     dimsEl.className = "tile-dims";
     dimsEl.textContent = `${format(sauna.config.barrelLength)} x ${format(sauna.config.barrelWidth)} cm`;
 
-    const revEl = document.createElement("div");
-    revEl.className = "tile-revision";
-    revEl.textContent = `Rev. ${sauna.revision}`;
-
     infoDiv.appendChild(nameEl);
     infoDiv.appendChild(dimsEl);
-    infoDiv.appendChild(revEl);
 
     tile.appendChild(imageDiv);
     tile.appendChild(infoDiv);

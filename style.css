@@ -111,12 +111,6 @@ body {
   margin-top: 2px;
 }
 
-.tile-revision {
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 1px;
-}
-
 /* --- Editor Layout --- */
 
 .editor-layout {
