@@ -1,8 +1,19 @@
-﻿const http = require('http');
+'use strict';
+
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const {
+  getAllSaunas,
+  getSaunaById,
+  upsertSauna,
+  deleteSauna,
+  getImagesForSauna,
+  addImageToSauna,
+  deleteImage,
+} = require('../server/database');
 
-const root = process.cwd();
+const root = path.resolve(__dirname, '..');
 const preferredPort = 8000;
 
 const mimeTypes = {
@@ -17,8 +28,108 @@ const mimeTypes = {
   '.webp': 'image/webp',
 };
 
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+      } catch {
+        reject(new Error('Ungueltiges JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJson(res, status, data) {
+  const body = JSON.stringify(data);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+function handleApi(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const segments = url.pathname.replace(/^\/api\//, '').split('/').filter(Boolean);
+  const method = req.method;
+
+  // GET /api/saunas
+  if (segments[0] === 'saunas' && segments.length === 1 && method === 'GET') {
+    const saunas = getAllSaunas();
+    return sendJson(res, 200, saunas);
+  }
+
+  // GET /api/saunas/:id
+  if (segments[0] === 'saunas' && segments.length === 2 && method === 'GET') {
+    const sauna = getSaunaById(segments[1]);
+    if (!sauna) return sendJson(res, 404, { error: 'Nicht gefunden' });
+    sauna.images = getImagesForSauna(segments[1]);
+    return sendJson(res, 200, sauna);
+  }
+
+  // POST /api/saunas  (create)
+  if (segments[0] === 'saunas' && segments.length === 1 && method === 'POST') {
+    return readBody(req).then((body) => {
+      upsertSauna(body);
+      const saved = getSaunaById(body.id);
+      sendJson(res, 201, saved);
+    }).catch((err) => sendJson(res, 400, { error: err.message }));
+  }
+
+  // PUT /api/saunas/:id  (update)
+  if (segments[0] === 'saunas' && segments.length === 2 && method === 'PUT') {
+    return readBody(req).then((body) => {
+      body.id = segments[1];
+      upsertSauna(body);
+      const saved = getSaunaById(segments[1]);
+      saved.images = getImagesForSauna(segments[1]);
+      sendJson(res, 200, saved);
+    }).catch((err) => sendJson(res, 400, { error: err.message }));
+  }
+
+  // DELETE /api/saunas/:id
+  if (segments[0] === 'saunas' && segments.length === 2 && method === 'DELETE') {
+    deleteSauna(segments[1]);
+    return sendJson(res, 204, null);
+  }
+
+  // GET /api/saunas/:id/images
+  if (segments[0] === 'saunas' && segments.length === 3 && segments[2] === 'images' && method === 'GET') {
+    const images = getImagesForSauna(segments[1]);
+    return sendJson(res, 200, images);
+  }
+
+  // POST /api/saunas/:id/images
+  if (segments[0] === 'saunas' && segments.length === 3 && segments[2] === 'images' && method === 'POST') {
+    return readBody(req).then((body) => {
+      body.saunaId = segments[1];
+      addImageToSauna(body);
+      sendJson(res, 201, body);
+    }).catch((err) => sendJson(res, 400, { error: err.message }));
+  }
+
+  // DELETE /api/images/:id
+  if (segments[0] === 'images' && segments.length === 2 && method === 'DELETE') {
+    deleteImage(segments[1]);
+    return sendJson(res, 204, null);
+  }
+
+  sendJson(res, 404, { error: 'Unbekannter API-Endpunkt' });
+}
+
 const server = http.createServer((req, res) => {
   const rawPath = (req.url || '/').split('?')[0];
+
+  // API-Anfragen
+  if (rawPath.startsWith('/api/')) {
+    return handleApi(req, res);
+  }
+
+  // Statische Dateien
   const relPath = rawPath === '/' ? 'index.html' : decodeURIComponent(rawPath.replace(/^\//, ''));
   const safeRelPath = relPath.replace(/^\.+[\\/]/, '');
   const filePath = path.resolve(root, safeRelPath);

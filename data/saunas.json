@@ -5,6 +5,8 @@
     "config": {
       "barrelLength": 220,
       "barrelWidth": 210,
+      "barrelHeight": 0,
+      "barrelLengthWithRoof": 0,
       "footWidth": 200,
       "footThickness": 8,
       "foundationWidth": 40,
@@ -18,6 +20,8 @@
     "config": {
       "barrelLength": 180,
       "barrelWidth": 195,
+      "barrelHeight": 0,
+      "barrelLengthWithRoof": 0,
       "footWidth": 180,
       "footThickness": 8,
       "foundationWidth": 35,

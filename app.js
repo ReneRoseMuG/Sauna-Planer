@@ -1,4 +1,4 @@
-﻿import { IMAGE_MAX_BYTES, createEmptySauna, nextRevision, sanitizeSauna, validateSauna } from "./domain/sauna.js";
+import { IMAGE_MAX_BYTES, createEmptySauna, nextRevision, sanitizeSauna, validateSauna } from "./domain/sauna.js";
 import { loadInitialData, getAll, getById, upsert, remove } from "./services/saunaStore.js";
 import { generatePlanSvg } from "./services/planGenerator.js";
 import { exportPlan } from "./services/planExporter.js";
@@ -20,11 +20,13 @@ const state = {
 };
 
 const elements = {
-  saunaList: document.getElementById("sauna-list"),
+  saunaTiles: document.getElementById("sauna-tiles"),
   form: document.getElementById("sauna-form"),
   name: document.getElementById("field-name"),
   barrelLength: document.getElementById("field-barrel-length"),
   barrelWidth: document.getElementById("field-barrel-width"),
+  barrelHeight: document.getElementById("field-barrel-height"),
+  barrelLengthRoof: document.getElementById("field-barrel-length-roof"),
   footWidth: document.getElementById("field-foot-width"),
   footThickness: document.getElementById("field-foot-thickness"),
   foundationWidth: document.getElementById("field-foundation-width"),
@@ -60,7 +62,7 @@ async function init() {
   state.selectedId = state.saunas.length > 0 ? state.saunas[0].id : "";
   bindEvents();
   setActiveEditorTab("config");
-  renderSaunaList();
+  renderSaunaTiles();
 
   if (state.selectedId) {
     await loadSelectedIntoForm();
@@ -87,7 +89,7 @@ function bindEvents() {
     await refreshSaunas();
     state.selectedId = created.id;
     state.dirty = false;
-    renderSaunaList();
+    renderSaunaTiles();
     await loadSelectedIntoForm();
     renderPreview();
   });
@@ -100,7 +102,7 @@ function bindEvents() {
     state.selectedId = state.saunas.length > 0 ? state.saunas[0].id : "";
     state.dirty = false;
     state.runtimeWarnings = [];
-    renderSaunaList();
+    renderSaunaTiles();
 
     if (state.selectedId) {
       await loadSelectedIntoForm();
@@ -139,7 +141,7 @@ function bindEvents() {
 
     state.selectedId = finalSauna.id;
     state.dirty = false;
-    renderSaunaList();
+    renderSaunaTiles();
     await loadSelectedIntoForm();
     renderPreview();
   });
@@ -183,14 +185,14 @@ function bindEvents() {
     renderPreview();
   });
 
-  elements.saunaList.addEventListener("click", async (event) => {
-    const button = event.target.closest("button[data-id]");
-    if (!button) return;
+  elements.saunaTiles.addEventListener("click", async (event) => {
+    const tile = event.target.closest("[data-id]");
+    if (!tile) return;
 
-    state.selectedId = button.dataset.id || "";
+    state.selectedId = tile.dataset.id || "";
     state.dirty = false;
     state.runtimeWarnings = [];
-    renderSaunaList();
+    renderSaunaTiles();
     await loadSelectedIntoForm();
     renderPreview();
   });
@@ -272,24 +274,60 @@ function renderTemplateOptions() {
   }
 }
 
-function renderSaunaList() {
-  elements.saunaList.innerHTML = "";
+function renderSaunaTiles() {
+  elements.saunaTiles.innerHTML = "";
 
   for (const sauna of state.saunas) {
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.id = sauna.id;
-
-    const imageMarker = sauna.images.length > 0 ? " [Bilder]" : "";
-    button.textContent = `${sauna.name}${imageMarker} (r${sauna.revision}, ${format(sauna.config.barrelLength)} x ${format(sauna.config.barrelWidth)} cm)`;
+    const tile = document.createElement("div");
+    tile.className = "sauna-tile";
+    tile.dataset.id = sauna.id;
 
     if (sauna.id === state.selectedId) {
-      button.classList.add("active");
+      tile.classList.add("active");
     }
 
-    item.appendChild(button);
-    elements.saunaList.appendChild(item);
+    // Image area
+    const imageDiv = document.createElement("div");
+    imageDiv.className = "tile-image";
+
+    const thumbnailUrl = sauna.thumbnailDataUrl
+      || (sauna.images && sauna.images.length > 0 ? sauna.images[0].dataUrl : null);
+
+    if (thumbnailUrl) {
+      const img = document.createElement("img");
+      img.src = thumbnailUrl;
+      img.alt = sauna.name;
+      imageDiv.appendChild(img);
+    } else {
+      const placeholder = document.createElement("span");
+      placeholder.className = "tile-image-placeholder";
+      placeholder.textContent = "\u2302"; // House symbol
+      imageDiv.appendChild(placeholder);
+    }
+
+    // Info area
+    const infoDiv = document.createElement("div");
+    infoDiv.className = "tile-info";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "tile-name";
+    nameEl.textContent = sauna.name;
+
+    const dimsEl = document.createElement("div");
+    dimsEl.className = "tile-dims";
+    dimsEl.textContent = `${format(sauna.config.barrelLength)} x ${format(sauna.config.barrelWidth)} cm`;
+
+    const revEl = document.createElement("div");
+    revEl.className = "tile-revision";
+    revEl.textContent = `Rev. ${sauna.revision}`;
+
+    infoDiv.appendChild(nameEl);
+    infoDiv.appendChild(dimsEl);
+    infoDiv.appendChild(revEl);
+
+    tile.appendChild(imageDiv);
+    tile.appendChild(infoDiv);
+    elements.saunaTiles.appendChild(tile);
   }
 }
 
@@ -307,6 +345,8 @@ function writeFormData(sauna) {
   elements.name.value = sauna.name;
   elements.barrelLength.value = String(sauna.config.barrelLength);
   elements.barrelWidth.value = String(sauna.config.barrelWidth);
+  elements.barrelHeight.value = String(sauna.config.barrelHeight || "");
+  elements.barrelLengthRoof.value = String(sauna.config.barrelLengthWithRoof || "");
   elements.footWidth.value = String(sauna.config.footWidth);
   elements.footThickness.value = String(sauna.config.footThickness);
   elements.foundationWidth.value = String(sauna.config.foundationWidth);
@@ -354,6 +394,7 @@ function readFormData() {
     createdAt: elements.form.dataset.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     images: state.currentImages,
+    thumbnailDataUrl: state.currentImages.length > 0 ? state.currentImages[0].dataUrl : null,
     exportSettings: {
       templateId: elements.templateId.value || getDefaultTemplate().id,
       format: elements.exportFormat.value === "svg" ? "svg" : "pdf",
@@ -362,6 +403,8 @@ function readFormData() {
     config: {
       barrelLength: parseNumber(elements.barrelLength.value),
       barrelWidth: parseNumber(elements.barrelWidth.value),
+      barrelHeight: parseNumber(elements.barrelHeight.value),
+      barrelLengthWithRoof: parseNumber(elements.barrelLengthRoof.value),
       footWidth: parseNumber(elements.footWidth.value),
       footThickness: parseNumber(elements.footThickness.value),
       foundationWidth: parseNumber(elements.foundationWidth.value),
@@ -540,6 +583,3 @@ function format(value) {
   const n = Number(value) || 0;
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
-
-
-

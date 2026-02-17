@@ -15,6 +15,8 @@ const ALLOWED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
  * @typedef {Object} SaunaConfig
  * @property {number} barrelLength
  * @property {number} barrelWidth
+ * @property {number} barrelHeight          Fasshoehe (informativ, nicht operativ verwendet)
+ * @property {number} barrelLengthWithRoof  Fasslaenge mit Dach (informativ, nicht operativ verwendet)
  * @property {number} footWidth
  * @property {number} footThickness
  * @property {number} foundationWidth
@@ -39,6 +41,7 @@ const ALLOWED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
  * @property {SaunaConfig} config
  * @property {SaunaImage[]} images
  * @property {ExportSettings} exportSettings
+ * @property {string|null} thumbnailDataUrl
  */
 
 /**
@@ -58,9 +61,12 @@ export function createEmptySauna() {
       format: "pdf",
       dimTextFontSizePx: 12,
     },
+    thumbnailDataUrl: null,
     config: {
       barrelLength: 220,
       barrelWidth: 210,
+      barrelHeight: 0,
+      barrelLengthWithRoof: 0,
       footWidth: 200,
       footThickness: 8,
       foundationWidth: 40,
@@ -92,9 +98,12 @@ export function sanitizeSauna(raw) {
     updatedAt: sanitizeIsoDate(source.updatedAt) || now,
     images,
     exportSettings: sanitizeExportSettings(source.exportSettings),
+    thumbnailDataUrl: typeof source.thumbnailDataUrl === "string" ? source.thumbnailDataUrl : null,
     config: {
       barrelLength: sanitizeNumber(configSource.barrelLength),
       barrelWidth: sanitizeNumber(configSource.barrelWidth),
+      barrelHeight: sanitizeNumber(configSource.barrelHeight),
+      barrelLengthWithRoof: sanitizeNumber(configSource.barrelLengthWithRoof),
       footWidth: sanitizeNumber(configSource.footWidth),
       footThickness: sanitizeNumber(configSource.footThickness),
       foundationWidth: sanitizeNumber(configSource.foundationWidth),

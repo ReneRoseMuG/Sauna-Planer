@@ -1,2 +1,4 @@
 ﻿.vscode
 .ai
+node_modules
+data/*.db

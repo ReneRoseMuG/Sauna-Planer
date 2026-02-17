@@ -1,0 +1,13 @@
+{
+  "name": "sauna-planer",
+  "version": "1.0.0",
+  "description": "Fundamentplan-Generator fuer Fasssaunen",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node scripts/dev-server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  }
+}

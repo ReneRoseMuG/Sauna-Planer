@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="de">
   <head>
     <meta charset="utf-8" />
@@ -13,10 +13,9 @@
       <aside class="panel panel-list">
         <h1>Sauna-Modelle</h1>
         <div class="toolbar">
-          <button id="btn-new" type="button">Neu</button>
-          <button id="btn-delete" type="button">Loeschen</button>
+          <button id="btn-new" type="button">Neues Modell</button>
         </div>
-        <ul id="sauna-list" class="sauna-list"></ul>
+        <div id="sauna-tiles" class="sauna-tiles"></div>
       </aside>
 
       <main class="panel panel-editor">
@@ -32,59 +31,83 @@
 
               <div class="toolbar toolbar-primary">
                 <button id="btn-save" type="submit" form="sauna-form">Speichern</button>
+                <button id="btn-delete" type="button" class="btn-danger">Loeschen</button>
               </div>
 
               <form id="sauna-form" autocomplete="off">
-                <div class="form-grid">
-                  <label>Name
-                    <input id="field-name" name="name" type="text" required />
-                  </label>
-                  <label>Fasslaenge (cm)
-                    <input id="field-barrel-length" name="barrelLength" type="number" step="0.1" min="0" />
-                  </label>
-                  <label>Fassbreite (cm)
-                    <input id="field-barrel-width" name="barrelWidth" type="number" step="0.1" min="0" />
-                  </label>
-                  <label>Fussbreite (cm)
-                    <input id="field-foot-width" name="footWidth" type="number" step="0.1" min="0" />
-                  </label>
-                  <label>Fussdicke (cm)
-                    <input id="field-foot-thickness" name="footThickness" type="number" step="0.1" min="0" />
-                  </label>
-                  <label>Fundamentbreite (cm)
-                    <input id="field-foundation-width" name="foundationWidth" type="number" step="0.1" min="0" />
-                  </label>
-                  <label>Frosttiefe (cm)
-                    <input id="field-foundation-depth" name="foundationDepth" type="number" step="0.1" min="0" />
-                  </label>
-                </div>
+                <fieldset>
+                  <legend>Modell</legend>
+                  <div class="form-grid">
+                    <label>Name
+                      <input id="field-name" name="name" type="text" required />
+                    </label>
+                  </div>
+                </fieldset>
 
-                <section class="distance-section">
-                  <div class="distance-header">
-                    <h3>Fussabstaende (Innenkante zu Innenkante)</h3>
+                <fieldset>
+                  <legend>Fassmasse</legend>
+                  <div class="form-grid">
+                    <label>Fasslaenge (cm)
+                      <input id="field-barrel-length" name="barrelLength" type="number" step="0.1" min="0" />
+                    </label>
+                    <label>Fassbreite (cm)
+                      <input id="field-barrel-width" name="barrelWidth" type="number" step="0.1" min="0" />
+                    </label>
+                    <label>Fasshoehe (cm)
+                      <input id="field-barrel-height" name="barrelHeight" type="number" step="0.1" min="0" placeholder="informativ" />
+                    </label>
+                    <label>Fasslaenge mit Dach (cm)
+                      <input id="field-barrel-length-roof" name="barrelLengthWithRoof" type="number" step="0.1" min="0" placeholder="informativ" />
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>Fussmasse</legend>
+                  <div class="form-grid">
+                    <label>Fussbreite (cm)
+                      <input id="field-foot-width" name="footWidth" type="number" step="0.1" min="0" />
+                    </label>
+                    <label>Fussdicke (cm)
+                      <input id="field-foot-thickness" name="footThickness" type="number" step="0.1" min="0" />
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>Fundament</legend>
+                  <div class="form-grid">
+                    <label>Fundamentbreite (cm)
+                      <input id="field-foundation-width" name="foundationWidth" type="number" step="0.1" min="0" />
+                    </label>
+                    <label>Frosttiefe (cm)
+                      <input id="field-foundation-depth" name="foundationDepth" type="number" step="0.1" min="0" />
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>Fussabstaende (Innenkante zu Innenkante)</legend>
+                  <div class="toolbar">
                     <button id="btn-add-distance" type="button">Abstand hinzufuegen</button>
                   </div>
                   <div id="distance-list" class="distance-list"></div>
-                </section>
+                </fieldset>
 
-                <section class="distance-section">
-                  <div class="distance-header">
-                    <h3>Referenzbilder</h3>
-                  </div>
+                <fieldset>
+                  <legend>Modellbild</legend>
                   <div class="toolbar">
                     <label class="file-button">
                       Bild hochladen
                       <input id="input-image-upload" type="file" accept="image/png,image/jpeg,image/webp" />
                     </label>
                   </div>
-                  <p class="hint-text">Bild per Upload oder Zwischenablage (Ctrl+V) hinzufuegen.</p>
+                  <p class="hint-text">Bild per Upload oder Zwischenablage (Ctrl+V) hinzufuegen. Das erste Bild wird als Kachelbild verwendet.</p>
                   <div id="image-gallery" class="image-gallery"></div>
-                </section>
+                </fieldset>
 
-                <section class="distance-section">
-                  <div class="distance-header">
-                    <h3>Export</h3>
-                  </div>
+                <fieldset>
+                  <legend>Export</legend>
                   <div class="form-grid">
                     <label>Planformat
                       <select id="field-export-format">
@@ -99,7 +122,7 @@
                       <input id="field-dim-font-size" name="dimTextFontSizePx" type="number" step="1" min="9" max="40" />
                     </label>
                   </div>
-                </section>
+                </fieldset>
               </form>
             </section>
 
