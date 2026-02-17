@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const {
+  initDb,
   getAllSaunas,
   getSaunaById,
   upsertSauna,
@@ -168,6 +169,11 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(currentPort, () => {
-  console.log(`Sauna Planer laeuft unter: http://localhost:${currentPort}`);
+initDb().then(() => {
+  server.listen(currentPort, () => {
+    console.log(`Sauna Planer laeuft unter: http://localhost:${currentPort}`);
+  });
+}).catch((err) => {
+  console.error('Datenbank-Initialisierung fehlgeschlagen:', err);
+  process.exit(1);
 });

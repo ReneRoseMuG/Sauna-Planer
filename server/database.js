@@ -1,27 +1,39 @@
 'use strict';
 
-const Database = require('better-sqlite3');
+const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
 
 const DB_PATH = path.resolve(__dirname, '..', 'data', 'sauna-planer.db');
 
-/** @type {Database.Database | null} */
+/** @type {import('sql.js').Database | null} */
 let db = null;
 
-function getDb() {
+/**
+ * Initialise the database (async, call once at startup).
+ * After this resolves every other function works synchronously.
+ */
+async function initDb() {
   if (db) return db;
+
+  const SQL = await initSqlJs();
 
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  if (fs.existsSync(DB_PATH)) {
+    const buffer = fs.readFileSync(DB_PATH);
+    db = new SQL.Database(buffer);
+  } else {
+    db = new SQL.Database();
+  }
 
-  db.exec(`
+  db.run('PRAGMA journal_mode = WAL');
+  db.run('PRAGMA foreign_keys = ON');
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS saunas (
       id            TEXT PRIMARY KEY,
       name          TEXT NOT NULL DEFAULT 'Unbenannt',
@@ -47,7 +59,7 @@ function getDb() {
     );
   `);
 
-  db.exec(`
+  db.run(`
     CREATE TABLE IF NOT EXISTS sauna_images (
       id          TEXT PRIMARY KEY,
       sauna_id    TEXT NOT NULL REFERENCES saunas(id) ON DELETE CASCADE,
@@ -58,17 +70,60 @@ function getDb() {
       label       TEXT DEFAULT NULL,
       sort_order  INTEGER NOT NULL DEFAULT 0
     );
-
-    CREATE INDEX IF NOT EXISTS idx_images_sauna ON sauna_images(sauna_id);
   `);
 
-  seed(db);
+  db.run('CREATE INDEX IF NOT EXISTS idx_images_sauna ON sauna_images(sauna_id)');
+
+  seed();
+  persist();
   return db;
 }
 
-function seed(database) {
-  const count = database.prepare('SELECT COUNT(*) as cnt FROM saunas').get();
-  if (count.cnt > 0) return;
+/** Write the in-memory database to disk */
+function persist() {
+  if (!db) return;
+  const dir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const data = db.export();
+  fs.writeFileSync(DB_PATH, Buffer.from(data));
+}
+
+// --- helpers to run queries and get rows as objects ---
+
+function allRows(sql, params) {
+  const stmt = db.prepare(sql);
+  if (params) stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return rows;
+}
+
+function oneRow(sql, params) {
+  const stmt = db.prepare(sql);
+  if (params) stmt.bind(params);
+  const row = stmt.step() ? stmt.getAsObject() : null;
+  stmt.free();
+  return row;
+}
+
+function run(sql, params) {
+  if (params) {
+    db.run(sql, params);
+  } else {
+    db.run(sql);
+  }
+}
+
+// --- seed ---
+
+function seed() {
+  const row = oneRow('SELECT COUNT(*) as cnt FROM saunas');
+  if (row && row.cnt > 0) return;
 
   const seedPath = path.resolve(__dirname, '..', 'data', 'saunas.json');
   if (!fs.existsSync(seedPath)) return;
@@ -77,47 +132,44 @@ function seed(database) {
   if (!Array.isArray(raw)) return;
 
   const now = new Date().toISOString();
-  const insert = database.prepare(`
+
+  const sql = `
     INSERT INTO saunas (
       id, name, revision, created_at, updated_at,
       barrel_length, barrel_width, barrel_height, barrel_length_with_roof,
       foot_width, foot_thickness, foundation_width, foundation_depth,
       foot_distances, export_template_id, export_format, export_dim_font_size_px
     ) VALUES (
-      @id, @name, @revision, @createdAt, @updatedAt,
-      @barrelLength, @barrelWidth, @barrelHeight, @barrelLengthWithRoof,
-      @footWidth, @footThickness, @foundationWidth, @foundationDepth,
-      @footDistances, @exportTemplateId, @exportFormat, @exportDimFontSizePx
+      $id, $name, $revision, $createdAt, $updatedAt,
+      $barrelLength, $barrelWidth, $barrelHeight, $barrelLengthWithRoof,
+      $footWidth, $footThickness, $foundationWidth, $foundationDepth,
+      $footDistances, $exportTemplateId, $exportFormat, $exportDimFontSizePx
     )
-  `);
+  `;
 
-  const insertMany = database.transaction((items) => {
-    for (const item of items) {
-      const cfg = item.config || {};
-      const exp = item.exportSettings || {};
-      insert.run({
-        id: item.id || `sauna-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        name: item.name || 'Unbenannt',
-        revision: item.revision || 1,
-        createdAt: item.createdAt || now,
-        updatedAt: item.updatedAt || now,
-        barrelLength: cfg.barrelLength || 220,
-        barrelWidth: cfg.barrelWidth || 210,
-        barrelHeight: cfg.barrelHeight || 0,
-        barrelLengthWithRoof: cfg.barrelLengthWithRoof || 0,
-        footWidth: cfg.footWidth || 200,
-        footThickness: cfg.footThickness || 8,
-        foundationWidth: cfg.foundationWidth || 40,
-        foundationDepth: cfg.foundationDepth || 80,
-        footDistances: JSON.stringify(cfg.footDistances || []),
-        exportTemplateId: exp.templateId || 'A4_PORTRAIT_STANDARD',
-        exportFormat: exp.format || 'pdf',
-        exportDimFontSizePx: exp.dimTextFontSizePx || 12,
-      });
-    }
-  });
-
-  insertMany(raw);
+  for (const item of raw) {
+    const cfg = item.config || {};
+    const exp = item.exportSettings || {};
+    run(sql, {
+      $id: item.id || `sauna-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      $name: item.name || 'Unbenannt',
+      $revision: item.revision || 1,
+      $createdAt: item.createdAt || now,
+      $updatedAt: item.updatedAt || now,
+      $barrelLength: cfg.barrelLength || 220,
+      $barrelWidth: cfg.barrelWidth || 210,
+      $barrelHeight: cfg.barrelHeight || 0,
+      $barrelLengthWithRoof: cfg.barrelLengthWithRoof || 0,
+      $footWidth: cfg.footWidth || 200,
+      $footThickness: cfg.footThickness || 8,
+      $foundationWidth: cfg.foundationWidth || 40,
+      $foundationDepth: cfg.foundationDepth || 80,
+      $footDistances: JSON.stringify(cfg.footDistances || []),
+      $exportTemplateId: exp.templateId || 'A4_PORTRAIT_STANDARD',
+      $exportFormat: exp.format || 'pdf',
+      $exportDimFontSizePx: exp.dimTextFontSizePx || 12,
+    });
+  }
 }
 
 /** Map DB row -> API JSON */
@@ -148,49 +200,43 @@ function rowToSauna(row) {
   };
 }
 
-/** Map API JSON -> DB params */
-function saunaToParams(sauna) {
-  const cfg = sauna.config || {};
-  const exp = sauna.exportSettings || {};
-  return {
-    id: sauna.id,
-    name: sauna.name || 'Unbenannt',
-    revision: sauna.revision || 1,
-    createdAt: sauna.createdAt || new Date().toISOString(),
-    updatedAt: sauna.updatedAt || new Date().toISOString(),
-    barrelLength: cfg.barrelLength || 0,
-    barrelWidth: cfg.barrelWidth || 0,
-    barrelHeight: cfg.barrelHeight || 0,
-    barrelLengthWithRoof: cfg.barrelLengthWithRoof || 0,
-    footWidth: cfg.footWidth || 0,
-    footThickness: cfg.footThickness || 0,
-    foundationWidth: cfg.foundationWidth || 0,
-    foundationDepth: cfg.foundationDepth || 0,
-    footDistances: JSON.stringify(cfg.footDistances || []),
-    exportTemplateId: exp.templateId || 'A4_PORTRAIT_STANDARD',
-    exportFormat: exp.format || 'pdf',
-    exportDimFontSizePx: exp.dimTextFontSizePx || 12,
-    thumbnailDataUrl: sauna.thumbnailDataUrl || null,
-  };
-}
-
 // --- CRUD ---
 
 function getAllSaunas() {
-  const rows = getDb().prepare(`
-    SELECT * FROM saunas ORDER BY name COLLATE NOCASE
-  `).all();
+  const rows = allRows('SELECT * FROM saunas ORDER BY name COLLATE NOCASE');
   return rows.map(rowToSauna);
 }
 
 function getSaunaById(id) {
-  const row = getDb().prepare('SELECT * FROM saunas WHERE id = ?').get(id);
+  const row = oneRow('SELECT * FROM saunas WHERE id = $id', { $id: id });
   return row ? rowToSauna(row) : null;
 }
 
 function upsertSauna(sauna) {
-  const p = saunaToParams(sauna);
-  getDb().prepare(`
+  const cfg = sauna.config || {};
+  const exp = sauna.exportSettings || {};
+  const params = {
+    $id: sauna.id,
+    $name: sauna.name || 'Unbenannt',
+    $revision: sauna.revision || 1,
+    $createdAt: sauna.createdAt || new Date().toISOString(),
+    $updatedAt: sauna.updatedAt || new Date().toISOString(),
+    $barrelLength: cfg.barrelLength || 0,
+    $barrelWidth: cfg.barrelWidth || 0,
+    $barrelHeight: cfg.barrelHeight || 0,
+    $barrelLengthWithRoof: cfg.barrelLengthWithRoof || 0,
+    $footWidth: cfg.footWidth || 0,
+    $footThickness: cfg.footThickness || 0,
+    $foundationWidth: cfg.foundationWidth || 0,
+    $foundationDepth: cfg.foundationDepth || 0,
+    $footDistances: JSON.stringify(cfg.footDistances || []),
+    $exportTemplateId: exp.templateId || 'A4_PORTRAIT_STANDARD',
+    $exportFormat: exp.format || 'pdf',
+    $exportDimFontSizePx: exp.dimTextFontSizePx || 12,
+    $thumbnailDataUrl: sauna.thumbnailDataUrl || null,
+  };
+
+  run(`
     INSERT INTO saunas (
       id, name, revision, created_at, updated_at,
       barrel_length, barrel_width, barrel_height, barrel_length_with_roof,
@@ -198,11 +244,11 @@ function upsertSauna(sauna) {
       foot_distances, export_template_id, export_format, export_dim_font_size_px,
       thumbnail_data_url
     ) VALUES (
-      @id, @name, @revision, @createdAt, @updatedAt,
-      @barrelLength, @barrelWidth, @barrelHeight, @barrelLengthWithRoof,
-      @footWidth, @footThickness, @foundationWidth, @foundationDepth,
-      @footDistances, @exportTemplateId, @exportFormat, @exportDimFontSizePx,
-      @thumbnailDataUrl
+      $id, $name, $revision, $createdAt, $updatedAt,
+      $barrelLength, $barrelWidth, $barrelHeight, $barrelLengthWithRoof,
+      $footWidth, $footThickness, $foundationWidth, $foundationDepth,
+      $footDistances, $exportTemplateId, $exportFormat, $exportDimFontSizePx,
+      $thumbnailDataUrl
     )
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
@@ -221,19 +267,23 @@ function upsertSauna(sauna) {
       export_format = excluded.export_format,
       export_dim_font_size_px = excluded.export_dim_font_size_px,
       thumbnail_data_url = excluded.thumbnail_data_url
-  `).run(p);
+  `, params);
+
+  persist();
 }
 
 function deleteSauna(id) {
-  getDb().prepare('DELETE FROM saunas WHERE id = ?').run(id);
+  run('DELETE FROM saunas WHERE id = $id', { $id: id });
+  persist();
 }
 
 // --- Images ---
 
 function getImagesForSauna(saunaId) {
-  return getDb().prepare(
-    'SELECT * FROM sauna_images WHERE sauna_id = ? ORDER BY sort_order, created_at'
-  ).all(saunaId).map((row) => ({
+  return allRows(
+    'SELECT * FROM sauna_images WHERE sauna_id = $saunaId ORDER BY sort_order, created_at',
+    { $saunaId: saunaId }
+  ).map((row) => ({
     id: row.id,
     saunaId: row.sauna_id,
     dataUrl: row.data_url,
@@ -246,27 +296,29 @@ function getImagesForSauna(saunaId) {
 }
 
 function addImageToSauna(image) {
-  getDb().prepare(`
+  run(`
     INSERT INTO sauna_images (id, sauna_id, data_url, mime_type, bytes, created_at, label, sort_order)
-    VALUES (@id, @saunaId, @dataUrl, @mimeType, @bytes, @createdAt, @label, @sortOrder)
-  `).run({
-    id: image.id,
-    saunaId: image.saunaId,
-    dataUrl: image.dataUrl,
-    mimeType: image.mimeType,
-    bytes: image.bytes || 0,
-    createdAt: image.createdAt || new Date().toISOString(),
-    label: image.label || null,
-    sortOrder: image.sortOrder || 0,
+    VALUES ($id, $saunaId, $dataUrl, $mimeType, $bytes, $createdAt, $label, $sortOrder)
+  `, {
+    $id: image.id,
+    $saunaId: image.saunaId,
+    $dataUrl: image.dataUrl,
+    $mimeType: image.mimeType,
+    $bytes: image.bytes || 0,
+    $createdAt: image.createdAt || new Date().toISOString(),
+    $label: image.label || null,
+    $sortOrder: image.sortOrder || 0,
   });
+  persist();
 }
 
 function deleteImage(imageId) {
-  getDb().prepare('DELETE FROM sauna_images WHERE id = ?').run(imageId);
+  run('DELETE FROM sauna_images WHERE id = $id', { $id: imageId });
+  persist();
 }
 
 module.exports = {
-  getDb,
+  initDb,
   getAllSaunas,
   getSaunaById,
   upsertSauna,
