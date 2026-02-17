@@ -323,7 +323,7 @@ input::placeholder {
 }
 
 .svg-preview svg {
-  width: 100%;
+  max-width: 100%;
   height: auto;
   display: block;
 }

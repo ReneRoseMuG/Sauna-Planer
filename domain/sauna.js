@@ -26,7 +26,6 @@ const ALLOWED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 /**
  * @typedef {Object} ExportSettings
- * @property {string} templateId
  * @property {"pdf"|"svg"} format
  * @property {number} dimTextFontSizePx
  */
@@ -57,7 +56,6 @@ export function createEmptySauna() {
     updatedAt: now,
     images: [],
     exportSettings: {
-      templateId: "A4_PORTRAIT_STANDARD",
       format: "pdf",
       dimTextFontSizePx: 12,
     },
@@ -225,12 +223,9 @@ function sanitizeImage(raw) {
 
 function sanitizeExportSettings(raw) {
   const source = isObject(raw) ? raw : {};
-  const templateId = typeof source.templateId === "string" && source.templateId.trim()
-    ? source.templateId.trim()
-    : "A4_PORTRAIT_STANDARD";
   const format = source.format === "svg" ? "svg" : "pdf";
   const dimTextFontSizePx = sanitizeFontSize(source.dimTextFontSizePx);
-  return { templateId, format, dimTextFontSizePx };
+  return { format, dimTextFontSizePx };
 }
 
 function sanitizeFontSize(value) {

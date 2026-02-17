@@ -1,24 +1,23 @@
-﻿import { exportSvgToPdf } from "./pdfExporter.js";
+import { exportSvgToPdf } from "./pdfExporter.js";
 
 /**
- * @param {{ format:"pdf"|"svg", composedDocument:{svgElement:SVGSVGElement,pageMm?:{width:number,height:number}}, fileNameBase:string }} input
+ * @param {{ format:"pdf"|"svg", svgElement:SVGSVGElement, fileNameBase:string }} input
  * @returns {Promise<void>}
  */
-export async function exportPlan({ format, composedDocument, fileNameBase }) {
-  if (!composedDocument || !(composedDocument.svgElement instanceof SVGSVGElement)) {
-    throw new Error("Es liegt kein gueltiges Layout-Dokument fuer den Export vor.");
+export async function exportPlan({ format, svgElement, fileNameBase }) {
+  if (!(svgElement instanceof SVGSVGElement)) {
+    throw new Error("Es liegt kein gueltiges SVG fuer den Export vor.");
   }
 
   const normalizedBase = sanitizeBaseName(fileNameBase || "fundamentplan");
 
   if (format === "svg") {
-    exportAsSvg(composedDocument.svgElement, `${normalizedBase}.svg`);
+    exportAsSvg(svgElement, `${normalizedBase}.svg`);
     return;
   }
 
-  await exportSvgToPdf(composedDocument.svgElement, {
+  await exportSvgToPdf(svgElement, {
     fileName: `${normalizedBase}.pdf`,
-    pageMm: composedDocument.pageMm,
   });
 }
 

@@ -2,8 +2,6 @@ import { IMAGE_MAX_BYTES, createEmptySauna, nextRevision, sanitizeSauna, validat
 import { loadInitialData, getAll, getById, upsert, remove } from "./services/saunaStore.js";
 import { generatePlanSvg } from "./services/planGenerator.js";
 import { exportPlan } from "./services/planExporter.js";
-import { composePlanDocument } from "./services/planLayoutEngine.js";
-import { getDefaultTemplate, getTemplateById, listTemplates } from "./services/templateRegistry.js";
 
 const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
@@ -15,8 +13,6 @@ const state = {
   runtimeWarnings: [],
   currentImages: [],
   previewSvg: null,
-  composedDocument: null,
-  templates: listTemplates(),
 };
 
 const elements = {
@@ -37,7 +33,6 @@ const elements = {
   imageUpload: document.getElementById("input-image-upload"),
   imageGallery: document.getElementById("image-gallery"),
   exportFormat: document.getElementById("field-export-format"),
-  templateId: document.getElementById("field-template-id"),
   dimFontSize: document.getElementById("field-dim-font-size"),
   tabConfig: document.getElementById("tab-config"),
   tabPlan: document.getElementById("tab-plan"),
@@ -55,7 +50,6 @@ init().catch((error) => {
 });
 
 async function init() {
-  renderTemplateOptions();
   await loadInitialData();
   await refreshSaunas();
 
@@ -217,11 +211,6 @@ function bindEvents() {
     renderPreview();
   });
 
-  elements.templateId.addEventListener("change", () => {
-    state.dirty = true;
-    renderPreview();
-  });
-
   elements.exportFormat.addEventListener("change", () => {
     state.dirty = true;
     renderPreview();
@@ -229,13 +218,13 @@ function bindEvents() {
 
   elements.btnExport.addEventListener("click", async () => {
     try {
-      if (!state.composedDocument) {
+      if (!state.previewSvg) {
         renderPreview();
       }
       const current = readFormData();
       await exportPlan({
         format: current.exportSettings.format,
-        composedDocument: state.composedDocument,
+        svgElement: state.previewSvg,
         fileNameBase: `fundamentplan_${current.name}`,
       });
     } catch (error) {
@@ -261,17 +250,6 @@ function setActiveEditorTab(tabId) {
 
 async function refreshSaunas() {
   state.saunas = await getAll();
-}
-
-function renderTemplateOptions() {
-  elements.templateId.innerHTML = "";
-  const templates = state.templates;
-  for (const template of templates) {
-    const option = document.createElement("option");
-    option.value = template.id;
-    option.textContent = template.label;
-    elements.templateId.appendChild(option);
-  }
 }
 
 function renderSaunaTiles() {
@@ -348,7 +326,6 @@ function writeFormData(sauna) {
   elements.foundationDepth.value = String(sauna.config.foundationDepth);
 
   elements.exportFormat.value = sauna.exportSettings.format;
-  elements.templateId.value = sauna.exportSettings.templateId;
   elements.dimFontSize.value = String(sauna.exportSettings.dimTextFontSizePx ?? 12);
 
   state.currentImages = Array.isArray(sauna.images) ? [...sauna.images] : [];
@@ -391,7 +368,6 @@ function readFormData() {
     images: state.currentImages,
     thumbnailDataUrl: state.currentImages.length > 0 ? state.currentImages[0].dataUrl : null,
     exportSettings: {
-      templateId: elements.templateId.value || getDefaultTemplate().id,
       format: elements.exportFormat.value === "svg" ? "svg" : "pdf",
       dimTextFontSizePx: parseNumber(elements.dimFontSize.value) || 12,
     },
@@ -413,38 +389,18 @@ function renderPreview() {
   const sauna = readFormData();
   const validation = validateSauna(sauna);
   const plan = generatePlanSvg(sauna.config, {
-    title: `Fundamentplan ${sauna.name}`,
+    title: `${sauna.name} - Draufsicht`,
     typography: {
       dimTextFontSizePx: sauna.exportSettings.dimTextFontSizePx,
     },
   });
 
-  const template = getTemplateById(sauna.exportSettings.templateId);
-  const composed = composePlanDocument({
-    template,
-    planSvg: plan.svgElement,
-    planGeometryBounds: plan.geometryBounds,
-    planAnnotationBounds: plan.annotationBounds,
-    meta: {
-      title: "Fundamentplan",
-      modelName: sauna.name,
-    },
-    notes: [
-      "Alle Masse in cm (ca.-Angaben).",
-      "F\u00FC\u00DFe und Fundamentstreifen sind als Draufsicht dargestellt.",
-    ],
-  });
-
   const warnings = [...state.runtimeWarnings, ...validation.warnings, ...plan.warnings];
-  if (composed.fit.warning) {
-    warnings.push(composed.fit.warning);
-  }
 
   elements.preview.innerHTML = "";
-  elements.preview.appendChild(composed.svgElement);
+  elements.preview.appendChild(plan.svgElement);
 
   state.previewSvg = plan.svgElement;
-  state.composedDocument = composed;
 
   renderWarnings(warnings);
 }
